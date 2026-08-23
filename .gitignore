@@ -147,3 +147,19 @@ output/
 
 # Vitest / Vite cache at repo root
 .vite/
+
+# ===================
+# BDX local dirty (keep VS Code clean)
+# ===================
+sub2api_usage_*.csv
+sub2api_usage_*.json
+*.wav
+*.m4a
+.account22-extra-backup-*.json
+.luna-route-backup-*.json
+Webshare*.txt
+deploy/__pycache__/
+deploy/artifacts/
+deploy/owner-api-keys.json
+deploy/sub2api-*.sql
+.zcode/
