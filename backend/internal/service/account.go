@@ -662,6 +662,7 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 				"gemini-3.6-flash-low",
 				"gemini-3.6-flash-medium",
 				"gemini-3.6-flash-tiered",
+				"gemini-3.7-flash-tiered",
 			})
 			applyAntigravityGemini31ProAliases(result)
 		}
