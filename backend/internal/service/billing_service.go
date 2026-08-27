@@ -344,6 +344,44 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// Gemini 3.7 Flash (Google AI pricing: $0.75 input / $3.75 output /
+	// $0.075 cached input per MTok). Antigravity's tiered alias is priced
+	// against this same base model when the remote catalog is unavailable.
+	s.fallbackPrices["gemini-3.7-flash"] = &ModelPricing{
+		InputPricePerToken:     0.75e-6,
+		OutputPricePerToken:    3.75e-6,
+		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 3 Pro preview family ($2 input / $12 output / $0.20 cached input
+	// per MTok). Covers gemini-3-pro-preview and its -high/-low effort aliases.
+	s.fallbackPrices["gemini-3-pro-preview"] = &ModelPricing{
+		InputPricePerToken:     2e-6,
+		OutputPricePerToken:    12e-6,
+		CacheReadPricePerToken: 0.2e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 2.5 Flash Lite ($0.10 input / $0.40 output / $0.01 cached input
+	// per MTok). Covers tab_flash_lite_preview.
+	s.fallbackPrices["gemini-2.5-flash-lite"] = &ModelPricing{
+		InputPricePerToken:     0.1e-6,
+		OutputPricePerToken:    0.4e-6,
+		CacheReadPricePerToken: 0.01e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 2.5 Flash ($0.30 input / $2.50 output / $0.03 cached input per
+	// MTok). Covers gemini-2.5-flash-thinking and other uncatalogued
+	// 2.5-flash variants.
+	s.fallbackPrices["gemini-2.5-flash"] = &ModelPricing{
+		InputPricePerToken:     0.3e-6,
+		OutputPricePerToken:    2.5e-6,
+		CacheReadPricePerToken: 0.03e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// OpenAI GPT-5.4（业务指定价格）
 	s.fallbackPrices["gpt-5.4"] = &ModelPricing{
 		InputPricePerToken:             2.5e-6,  // $2.5 per MTok
@@ -747,6 +785,103 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:    2,
 		LongContextOutputMultiplier:   2,
 	}
+
+	// Alibaba Qwen3.8 Max (DashScope official pricing: $2 input / $6 output /
+	// $0.25 cached input per MTok). The public composite slugs
+	// (alibaba-token-plan-qwen3.8-max / go-qwen3.8-max / dashscope/qwen3.8-max)
+	// are not LiteLLM keys, so they are matched explicitly below.
+	s.fallbackPrices["qwen3.8-max"] = &ModelPricing{
+		InputPricePerToken:     2e-6,
+		OutputPricePerToken:    6e-6,
+		CacheReadPricePerToken: 0.25e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Alibaba Qwen3.7 Plus / Qwen3.7 Max (DashScope: $0.40 input / $1.20
+	// output / $0.05 cached input per MTok).
+	s.fallbackPrices["qwen3.7-plus"] = &ModelPricing{
+		InputPricePerToken:     0.4e-6,
+		OutputPricePerToken:    1.2e-6,
+		CacheReadPricePerToken: 0.05e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Alibaba Qwen3.6 Flash (DashScope: $0.10 input / $0.40 output / $0.01
+	// cached input per MTok).
+	s.fallbackPrices["qwen3.6-flash"] = &ModelPricing{
+		InputPricePerToken:     0.1e-6,
+		OutputPricePerToken:    0.4e-6,
+		CacheReadPricePerToken: 0.01e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Xiaomi MiMo v2.5 ($0.10 input / $0.30 output per MTok).
+	s.fallbackPrices["mimo-v2.5"] = &ModelPricing{
+		InputPricePerToken:     0.1e-6,
+		OutputPricePerToken:    0.3e-6,
+		CacheReadPricePerToken: 0.02e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// OpenAI gpt-oss-120b open model ($0.15 input / $0.60 output per MTok).
+	s.fallbackPrices["gpt-oss-120b"] = &ModelPricing{
+		InputPricePerToken:     0.15e-6,
+		OutputPricePerToken:    0.6e-6,
+		CacheReadPricePerToken: 0.03e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// JoyVoice fast audio is token-billed on the Gemini 2.5 Flash card
+	// ($0.30 input / $2.50 output per MTok), matching the historical
+	// per-token charges recorded before the 2026-08-24 reset.
+	s.fallbackPrices["joyvoice-fast-audio"] = &ModelPricing{
+		InputPricePerToken:     0.3e-6,
+		OutputPricePerToken:    2.5e-6,
+		CacheReadPricePerToken: 0.03e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Muse Spark 1.2 ($1.25 input / $4.25 output / $0.15 cached input per
+	// MTok). Mirrors the bundled pricing catalog entries for the go-/bare
+	// composite slugs.
+	s.fallbackPrices["muse-spark-1.2"] = &ModelPricing{
+		InputPricePerToken:         1.25e-6,
+		OutputPricePerToken:        4.25e-6,
+		CacheCreationPricePerToken: 1.25e-6,
+		CacheReadPricePerToken:     0.15e-6,
+		SupportsCacheBreakdown:     false,
+	}
+
+	// Muse Spark 1.2 contributor tier ($0.10 input / $0.20 output / $0.002
+	// cached input per MTok).
+	s.fallbackPrices["muse-spark-1.2-contributor"] = &ModelPricing{
+		InputPricePerToken:         0.1e-6,
+		OutputPricePerToken:        0.2e-6,
+		CacheCreationPricePerToken: 0.1e-6,
+		CacheReadPricePerToken:     0.002e-6,
+		SupportsCacheBreakdown:     false,
+	}
+
+	// Ox Alpha free tier bills at $0 (explicit zero card so the alias is
+	// identified and never falls through to a guessed family price).
+	s.fallbackPrices["ox-alpha-free"] = &ModelPricing{
+		InputPricePerToken:     0,
+		OutputPricePerToken:    0,
+		CacheReadPricePerToken: 0,
+		SupportsCacheBreakdown: false,
+	}
+}
+
+// stripCompositeBillingPrefix 去掉复合路由前缀（alibaba-token-plan- / go-），
+// 返回裸上游模型名。仅处理精确前缀形式，避免未知裸模型被误剥离。
+func stripCompositeBillingPrefix(modelLower string) (string, bool) {
+	if stripped, ok := strings.CutPrefix(modelLower, "alibaba-token-plan-"); ok && stripped != "" {
+		return stripped, true
+	}
+	if stripped, ok := strings.CutPrefix(modelLower, "go-"); ok && stripped != "" {
+		return stripped, true
+	}
+	return "", false
 }
 
 // getFallbackPricing 根据模型系列获取回退价格
@@ -795,6 +930,30 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.6-flash") || strings.Contains(modelLower, "gemini-3-6-flash") {
 		return s.fallbackPrices["gemini-3.6-flash"]
 	}
+	if strings.Contains(modelLower, "gemini-3.7-flash") || strings.Contains(modelLower, "gemini-3-7-flash") {
+		return s.fallbackPrices["gemini-3.7-flash"]
+	}
+	// Antigravity Gemini 3 Pro effort aliases (-high/-low) and the
+	// "gemini-pro-agent" agent mode bill on the Gemini 3 Pro card.
+	if strings.Contains(modelLower, "gemini-3-pro") || modelLower == "gemini-pro-agent" {
+		return s.fallbackPrices["gemini-3-pro-preview"]
+	}
+	// Gemini 2.5 Flash Lite class (tab_flash_lite_preview).
+	if strings.Contains(modelLower, "gemini-2.5-flash-lite") || modelLower == "tab_flash_lite_preview" {
+		return s.fallbackPrices["gemini-2.5-flash-lite"]
+	}
+	// Gemini 2.5 Flash variants not in the catalog (e.g. -thinking).
+	if strings.Contains(modelLower, "gemini-2.5-flash") {
+		return s.fallbackPrices["gemini-2.5-flash"]
+	}
+	// JoyVoice fast audio is token-billed on the Gemini 2.5 Flash card.
+	if strings.Contains(modelLower, "joyvoice") {
+		return s.fallbackPrices["joyvoice-fast-audio"]
+	}
+	// OpenAI gpt-oss open models ($0.15 input / $0.60 output per MTok).
+	if strings.Contains(modelLower, "gpt-oss-120b") {
+		return s.fallbackPrices["gpt-oss-120b"]
+	}
 
 	// DeepSeek V4 系列：仅匹配已知 V4 Pro/Flash 与官方兼容别名
 	// （deepseek-chat / deepseek-reasoner → V4 Flash），未知 deepseek-* 型号不回退，避免误计价。
@@ -806,6 +965,46 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "deepseek-chat") || strings.Contains(modelLower, "deepseek-reasoner") {
 		return s.fallbackPrices["deepseek-v4-flash"]
+	}
+
+	// Alibaba Qwen3.8 Max: $2/M input, $6/M output, and $0.25/M cached input.
+	// The public composite slugs are not LiteLLM keys.
+	if modelLower == "qwen3.8-max" || modelLower == "dashscope/qwen3.8-max" ||
+		modelLower == "alibaba-token-plan-qwen3.8-max" || modelLower == "go-qwen3.8-max" {
+		return s.fallbackPrices["qwen3.8-max"]
+	}
+
+	// Composite channel slugs: strip the routing prefix and re-resolve the
+	// bare upstream model (alibaba-token-plan-<m> / go-<m> / ox free tiers).
+	// Only exact prefixed forms are stripped; unknown bare models still fail
+	// closed.
+	if stripped, ok := stripCompositeBillingPrefix(modelLower); ok {
+		return s.getFallbackPricing(stripped)
+	}
+
+	// Muse Spark composite slugs (go-muse-spark-1.2[-contributor]).
+	if strings.Contains(modelLower, "muse-spark-1.2-contributor") {
+		return s.fallbackPrices["muse-spark-1.2-contributor"]
+	}
+	if strings.Contains(modelLower, "muse-spark-1.2") || strings.Contains(modelLower, "muse-spark-1.1") {
+		return s.fallbackPrices["muse-spark-1.2"]
+	}
+
+	// Ox Alpha free tier: explicit zero card.
+	if modelLower == "ox-alpha-free" {
+		return s.fallbackPrices["ox-alpha-free"]
+	}
+
+	// Alibaba DashScope Qwen family（qwen3.7-plus / qwen3.7-max / qwen3.6-flash）。
+	if strings.Contains(modelLower, "qwen3.7") {
+		return s.fallbackPrices["qwen3.7-plus"]
+	}
+	if strings.Contains(modelLower, "qwen3.6") {
+		return s.fallbackPrices["qwen3.6-flash"]
+	}
+	// 小米 MiMo（mimo-v2.5 等）。
+	if strings.Contains(modelLower, "mimo") {
+		return s.fallbackPrices["mimo-v2.5"]
 	}
 
 	// ---- 国产 LLM 兜底匹配 ----
