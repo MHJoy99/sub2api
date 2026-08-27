@@ -494,7 +494,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			pendingReasoning = ""
 			lastTurnReasoning = ""
 			continue
-		case "input_image":
+		case "input_image", "input_audio":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
 				return nil, nil, err
@@ -921,6 +921,23 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 				Type:     "image_url",
 				ImageURL: &ChatImageURL{URL: imageURL},
 			})
+		case "input_audio":
+			rawAudio := part["input_audio"]
+			var audio ChatInputAudio
+			if len(rawAudio) == 0 {
+				return nil, fmt.Errorf("input_audio content part is missing input_audio")
+			}
+			if err := json.Unmarshal(rawAudio, &audio); err != nil {
+				return nil, fmt.Errorf("parse input_audio content part: %w", err)
+			}
+			if err := validateChatInputAudio(&audio, 0); err != nil {
+				return nil, err
+			}
+			hasNonText = true
+			chatParts = append(chatParts, ChatContentPart{
+				Type:       "input_audio",
+				InputAudio: &audio,
+			})
 		}
 	}
 
@@ -950,6 +967,19 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 			Type:     "image_url",
 			ImageURL: &ChatImageURL{URL: imageURL},
 		}})
+	case "input_audio":
+		var audio ChatInputAudio
+		rawAudio := part["input_audio"]
+		if len(rawAudio) == 0 {
+			return nil, fmt.Errorf("input_audio content part is missing input_audio")
+		}
+		if err := json.Unmarshal(rawAudio, &audio); err != nil {
+			return nil, fmt.Errorf("parse input_audio content part: %w", err)
+		}
+		if err := validateChatInputAudio(&audio, 0); err != nil {
+			return nil, err
+		}
+		return json.Marshal([]ChatContentPart{{Type: "input_audio", InputAudio: &audio}})
 	default:
 		return json.Marshal(rawString(part["text"]))
 	}

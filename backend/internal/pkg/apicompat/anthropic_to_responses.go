@@ -239,6 +239,12 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
 				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
 			}
+		case "audio":
+			audio, err := anthropicAudioToChatAudio(b.Source)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, ResponsesContentPart{Type: "input_audio", InputAudio: audio})
 		}
 	}
 	parts = append(parts, toolResultImageParts...)
@@ -360,6 +366,34 @@ func anthropicImageToDataURI(src *AnthropicImageSource) string {
 		mediaType = "image/png"
 	}
 	return "data:" + mediaType + ";base64," + src.Data
+}
+
+// anthropicAudioToChatAudio converts an Anthropic audio source into the
+// internal input_audio representation without discarding malformed blocks.
+func anthropicAudioToChatAudio(src *AnthropicImageSource) (*ChatInputAudio, error) {
+	if src == nil {
+		return nil, fmt.Errorf("audio block is missing source")
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(src.MediaType))
+	format, ok := map[string]string{
+		"audio/wav":   "wav",
+		"audio/mpeg":  "mp3",
+		"audio/mp3":   "mp3",
+		"audio/ogg":   "ogg",
+		"audio/flac":  "flac",
+		"audio/aac":   "aac",
+		"audio/webm":  "webm",
+		"audio/pcm":   "pcm16",
+		"audio/basic": "g711_ulaw",
+	}[mediaType]
+	if !ok {
+		return nil, fmt.Errorf("unsupported audio media type")
+	}
+	audio := &ChatInputAudio{Data: src.Data, Format: format}
+	if err := validateChatInputAudio(audio, 0); err != nil {
+		return nil, err
+	}
+	return audio, nil
 }
 
 // convertToolResultOutput extracts text and image content from a tool_result

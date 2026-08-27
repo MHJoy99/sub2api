@@ -309,9 +309,10 @@ func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 
 // ResponsesContentPart is a typed content part in a Responses message.
 type ResponsesContentPart struct {
-	Type     string `json:"type"` // "input_text" | "output_text" | "input_image" | "input_file"
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"` // data URI for input_image
+	Type       string          `json:"type"` // "input_text" | "output_text" | "input_image" | "input_audio" | "input_file"
+	Text       string          `json:"text,omitempty"`
+	ImageURL   string          `json:"image_url,omitempty"` // data URI for input_image
+	InputAudio *ChatInputAudio `json:"input_audio,omitempty"`
 
 	// input_file fields.
 	Filename string `json:"filename,omitempty"`
@@ -690,10 +691,17 @@ type ChatMessage struct {
 
 // ChatContentPart is a typed content part in a multi-modal message.
 type ChatContentPart struct {
-	Type     string        `json:"type"` // "text" | "image_url" | "file"
-	Text     string        `json:"text,omitempty"`
-	ImageURL *ChatImageURL `json:"image_url,omitempty"`
-	File     *ChatFile     `json:"file,omitempty"`
+	Type       string          `json:"type"` // "text" | "image_url" | "file" | "input_audio"
+	Text       string          `json:"text,omitempty"`
+	ImageURL   *ChatImageURL   `json:"image_url,omitempty"`
+	InputAudio *ChatInputAudio `json:"input_audio,omitempty"`
+	File       *ChatFile       `json:"file,omitempty"`
+}
+
+// ChatInputAudio contains base64 audio data and its OpenAI format name.
+type ChatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 // ChatImageURL contains the URL for an image content part.

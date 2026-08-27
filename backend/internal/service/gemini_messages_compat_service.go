@@ -3313,6 +3313,29 @@ func extractClaudeSystemText(system any) string {
 	}
 }
 
+func geminiAudioMIMEType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "mp3":
+		return "audio/mpeg"
+	case "ogg":
+		return "audio/ogg"
+	case "flac":
+		return "audio/flac"
+	case "aac":
+		return "audio/aac"
+	case "webm":
+		return "audio/webm"
+	case "pcm16":
+		return "audio/pcm"
+	case "g711_ulaw", "g711_alaw":
+		return "audio/basic"
+	case "", "wav":
+		return "audio/wav"
+	default:
+		return "audio/" + strings.ToLower(strings.TrimSpace(format))
+	}
+}
+
 func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[string]string) ([]any, error) {
 	arr, ok := messages.([]any)
 	if !ok {
@@ -3388,11 +3411,29 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 							},
 						},
 					})
-				case "image":
+				case "image", "audio":
 					if src, ok := bm["source"].(map[string]any); ok {
-						if srcType, _ := src["type"].(string); srcType == "base64" {
+						srcType, _ := src["type"].(string)
+						if srcType != "base64" {
+							if bt == "audio" {
+								return nil, fmt.Errorf("audio source type must be base64")
+							}
+						} else {
 							mediaType, _ := src["media_type"].(string)
 							data, _ := src["data"].(string)
+							if bt == "audio" {
+								if strings.TrimSpace(data) == "" {
+									return nil, fmt.Errorf("audio block is missing data")
+								}
+								if strings.TrimSpace(mediaType) == "" {
+									return nil, fmt.Errorf("audio block is missing media type")
+								}
+								if _, err := base64.StdEncoding.DecodeString(data); err != nil {
+									if _, rawErr := base64.RawStdEncoding.DecodeString(data); rawErr != nil {
+										return nil, fmt.Errorf("audio block has invalid base64 data")
+									}
+								}
+							}
 							if mediaType != "" && data != "" {
 								parts = append(parts, map[string]any{
 									"inlineData": map[string]any{
@@ -3402,7 +3443,25 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 								})
 							}
 						}
+					} else if bt == "audio" {
+						return nil, fmt.Errorf("audio block is missing base64 source")
 					}
+				case "input_audio":
+					audio, _ := bm["input_audio"].(map[string]any)
+					if audio == nil {
+						return nil, fmt.Errorf("input_audio block is missing input_audio")
+					}
+					data, _ := audio["data"].(string)
+					format, _ := audio["format"].(string)
+					if strings.TrimSpace(data) == "" || strings.TrimSpace(format) == "" {
+						return nil, fmt.Errorf("input_audio block is missing data or format")
+					}
+					parts = append(parts, map[string]any{
+						"inlineData": map[string]any{
+							"mimeType": geminiAudioMIMEType(format),
+							"data":     data,
+						},
+					})
 				default:
 					// best-effort: preserve unknown blocks as text
 					if b, err := json.Marshal(bm); err == nil {

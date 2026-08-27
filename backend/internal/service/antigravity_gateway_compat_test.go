@@ -182,6 +182,106 @@ func TestAntigravityCompatOAuthUsesNativeTokenAndRoute(t *testing.T) {
 	}
 }
 
+func TestAntigravityCompatAudioFastPathPreservesGeminiInlineData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gemini-3.1-pro-high","stream":false,"max_tokens":100000,"messages":[{"role":"user","content":[{"type":"text","text":"Transcribe this"},{"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}]}]}`)
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{antigravityCompatSuccessResponse()},
+	}
+	svc := newAntigravityCompatService(
+		config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		upstream,
+	)
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+
+	result, err := svc.ForwardAsChatCompletions(
+		context.Background(),
+		c,
+		newAntigravityCompatAccount(AccountTypeOAuth),
+		body,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, upstream.requestBodies, 1)
+	require.Equal(t, "audio/wav", gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.1.inlineData.mimeType").String())
+	require.Equal(t, "UklGRg==", gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.1.inlineData.data").String())
+	require.Equal(t, int64(antigravityCompatMaxTokens), gjson.GetBytes(upstream.requestBodies[0], "request.generationConfig.maxOutputTokens").Int())
+}
+
+func TestAntigravityCompatAudioMixedWithImageFallsBackToCanonical(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gemini-3.1-pro-high","stream":false,"messages":[{"role":"user","content":[{"type":"text","text":"Transcribe and describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}},{"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}]}]}`)
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{antigravityCompatSuccessResponse()},
+	}
+	svc := newAntigravityCompatService(
+		config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		upstream,
+	)
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+
+	result, err := svc.ForwardAsChatCompletions(
+		context.Background(),
+		c,
+		newAntigravityCompatAccount(AccountTypeOAuth),
+		body,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, upstream.requestBodies, 1)
+	// Canonical path converts image to image/png and audio to audio/wav inlineData
+	require.Equal(t, "image/png", gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.1.inlineData.mimeType").String())
+	require.Equal(t, "audio/wav", gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.2.inlineData.mimeType").String())
+}
+
+func TestAntigravityCompatAudioRejectsInvalidInputBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name  string
+		audio string
+	}{
+		{name: "invalid base64", audio: "not-base64!!!"},
+		{name: "missing data", audio: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"gemini-3.1-pro-high","stream":false,"messages":[{"role":"user","content":[{"type":"text","text":"Transcribe this"},{"type":"input_audio","input_audio":{"data":"` + tt.audio + `","format":"wav"}}]}]}`)
+			upstream := &queuedHTTPUpstreamStub{
+				responses: []*http.Response{antigravityCompatSuccessResponse()},
+			}
+			svc := newAntigravityCompatService(
+				config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+				upstream,
+			)
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+
+			result, err := svc.ForwardAsChatCompletions(
+				context.Background(),
+				c,
+				newAntigravityCompatAccount(AccountTypeOAuth),
+				body,
+				nil,
+			)
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Empty(t, upstream.requestBodies)
+			require.Contains(t, strings.ToLower(recorder.Body.String()), "audio")
+		})
+	}
+}
+
 func TestAntigravityCompatRejectsUnsupportedAccountType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

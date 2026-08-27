@@ -150,6 +150,18 @@ func TestBuildParts_ToolUseSignatureHandling(t *testing.T) {
 	})
 }
 
+func TestBuildParts_AudioBlockPreservesGeminiInlineData(t *testing.T) {
+	const audioData = "UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	parts, _, err := buildParts(json.RawMessage(`[
+		{"type":"audio","source":{"type":"base64","media_type":"audio/wav","data":"`+audioData+`"}}
+	]`), make(map[string]string), true)
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	require.NotNil(t, parts[0].InlineData)
+	require.Equal(t, "audio/wav", parts[0].InlineData.MimeType)
+	require.Equal(t, audioData, parts[0].InlineData.Data)
+}
+
 // TestBuildTools_CustomTypeTools 测试custom类型工具转换
 func TestBuildTools_CustomTypeTools(t *testing.T) {
 	tests := []struct {

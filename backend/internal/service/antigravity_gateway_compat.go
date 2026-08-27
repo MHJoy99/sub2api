@@ -35,6 +35,7 @@ type antigravityCompatRequest struct {
 	protocol        antigravityCompatProtocol
 	originalBody    []byte
 	claudeBody      []byte
+	chatRequest     *apicompat.ChatCompletionsRequest
 	originalModel   string
 	clientStream    bool
 	includeUsage    bool
@@ -86,10 +87,16 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
+	var chatRequest *apicompat.ChatCompletionsRequest
+	if apicompat.ChatCompletionsRequestHasInputAudio(&request) && isAntigravityAudioFastPathEligible(&request) {
+		chatRequest = &request
+	}
+
 	return s.forwardAntigravityCompat(ctx, c, account, antigravityCompatRequest{
 		protocol:        antigravityCompatChatCompletions,
 		originalBody:    body,
 		claudeBody:      claudeBody,
+		chatRequest:     chatRequest,
 		originalModel:   request.Model,
 		clientStream:    request.Stream,
 		includeUsage:    request.StreamOptions != nil && request.StreamOptions.IncludeUsage,
@@ -238,7 +245,12 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
+	var geminiBody []byte
+	if request.chatRequest != nil && strings.HasPrefix(strings.ToLower(mappedModel), "gemini-") {
+		geminiBody, err = s.buildAntigravityAudioGeminiBody(ctx, request.chatRequest, projectID, mappedModel)
+	} else {
+		geminiBody, err = s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
+	}
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
@@ -252,6 +264,146 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		accessToken:  accessToken,
 		geminiBody:   geminiBody,
 	}, nil
+}
+
+func isAntigravityAudioFastPathEligible(request *apicompat.ChatCompletionsRequest) bool {
+	if request == nil || request.ReasoningEffort != "" || len(request.Tools) > 0 || len(request.Functions) > 0 || len(request.ToolChoice) > 0 || len(request.FunctionCall) > 0 || len(request.ResponseFormat) > 0 || strings.TrimSpace(request.Instructions) != "" || len(request.Stop) > 0 {
+		return false
+	}
+	// Verify that messages contain ONLY text or input_audio parts (no image_url or file parts, which need canonical pipeline)
+	for _, msg := range request.Messages {
+		if len(msg.Content) == 0 {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(msg.Content, &text); err == nil {
+			continue
+		}
+		var parts []apicompat.ChatContentPart
+		if err := json.Unmarshal(msg.Content, &parts); err != nil {
+			return false
+		}
+		for _, part := range parts {
+			if part.Type != "text" && part.Type != "input_audio" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (s *AntigravityGatewayService) buildAntigravityAudioGeminiBody(
+	_ context.Context,
+	request *apicompat.ChatCompletionsRequest,
+	projectID string,
+	mappedModel string,
+) ([]byte, error) {
+	if request == nil {
+		return nil, fmt.Errorf("audio request is nil")
+	}
+
+	contents := make([]any, 0, len(request.Messages))
+	systemParts := make([]any, 0)
+	for messageIndex, message := range request.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role == "" {
+			role = "user"
+		}
+		if role == "developer" || role == "system" {
+			parts, err := audioChatContentToGeminiParts(message.Content)
+			if err != nil {
+				return nil, fmt.Errorf("message %d: %w", messageIndex, err)
+			}
+			systemParts = append(systemParts, parts...)
+			continue
+		}
+		if role != "user" && role != "assistant" {
+			return nil, fmt.Errorf("message %d has unsupported role", messageIndex)
+		}
+		parts, err := audioChatContentToGeminiParts(message.Content)
+		if err != nil {
+			return nil, fmt.Errorf("message %d: %w", messageIndex, err)
+		}
+		if len(parts) == 0 {
+			return nil, fmt.Errorf("message %d has no usable content", messageIndex)
+		}
+		geminiRole := "user"
+		if role == "assistant" {
+			geminiRole = "model"
+		}
+		contents = append(contents, map[string]any{"role": geminiRole, "parts": parts})
+	}
+	if len(contents) == 0 {
+		return nil, fmt.Errorf("audio request has no user content")
+	}
+
+	inner := map[string]any{"contents": contents}
+	if len(systemParts) > 0 {
+		inner["systemInstruction"] = map[string]any{"parts": systemParts}
+	}
+	generationConfig := make(map[string]any)
+	if request.MaxTokens != nil && *request.MaxTokens > 0 {
+		generationConfig["maxOutputTokens"] = min(*request.MaxTokens, antigravityCompatMaxTokens)
+	}
+	if request.MaxCompletionTokens != nil && *request.MaxCompletionTokens > 0 {
+		generationConfig["maxOutputTokens"] = min(*request.MaxCompletionTokens, antigravityCompatMaxTokens)
+	}
+	if request.Temperature != nil {
+		generationConfig["temperature"] = *request.Temperature
+	}
+	if request.TopP != nil {
+		generationConfig["topP"] = *request.TopP
+	}
+	if len(generationConfig) > 0 {
+		inner["generationConfig"] = generationConfig
+	}
+
+	body, err := json.Marshal(inner)
+	if err != nil {
+		return nil, err
+	}
+	body, err = injectIdentityPatchToGeminiRequest(body)
+	if err != nil {
+		return nil, err
+	}
+	if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
+		body = cleaned
+	}
+	return s.wrapV1InternalRequest(projectID, mappedModel, body)
+}
+
+func audioChatContentToGeminiParts(raw json.RawMessage) ([]any, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, fmt.Errorf("content is empty")
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return []any{map[string]any{"text": text}}, nil
+	}
+	var parts []apicompat.ChatContentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, fmt.Errorf("content is not a string or parts array")
+	}
+	out := make([]any, 0, len(parts))
+	for index, part := range parts {
+		switch part.Type {
+		case "text":
+			out = append(out, map[string]any{"text": part.Text})
+		case "input_audio":
+			if part.InputAudio == nil {
+				return nil, fmt.Errorf("input_audio part %d is missing input_audio", index)
+			}
+			out = append(out, map[string]any{
+				"inlineData": map[string]any{
+					"mimeType": apicompat.ChatInputAudioMIMEType(part.InputAudio.Format),
+					"data":     part.InputAudio.Data,
+				},
+			})
+		default:
+			return nil, fmt.Errorf("unsupported content part type %q at index %d", part.Type, index)
+		}
+	}
+	return out, nil
 }
 
 func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
