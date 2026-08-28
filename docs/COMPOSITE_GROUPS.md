@@ -93,11 +93,12 @@ guessing a provider.
   The channel `group_ids` payload is still flat; provider-specific model
   mapping and pricing remain keyed by concrete platform.
 
-## Bucket 2 Setup: OpenAI + Claude + Gemini + Grok
+## Example Setup: OpenAI + Claude + Gemini + Grok
 
 Use one composite subscription group when one customer-facing plan should expose
 model aliases across OpenAI, Claude, Gemini, and Grok without issuing separate
-keys per provider.
+keys per provider. This is an illustrative setup; the deployed instance is
+documented in [Production Setup: All Providers](#production-setup-all-providers).
 
 1. Create concrete provider groups for the upstream account pools, for example
    `OpenAI Paid`, `Claude Paid`, `Gemini Paid`, and `Grok Paid`.
@@ -149,6 +150,25 @@ key remains bound to group 4, while `alibaba_token_plan` and `opencode_go`
 remain available for provider-isolated clients. API keys bind to one group;
 use group 7 when a client needs one key for all configured models.
 
+Deployed key-to-group map:
+
+| Local key name | Group | Use |
+| --- | ---: | --- |
+| `all_models` | 4 | Existing unified models only |
+| `alibaba_token_plan` | 5 | Alibaba-only access |
+| `opencode_go` | 6 | OpenCode Go-only access |
+| `all_providers` | 7 | All configured provider models |
+
+The group-4 key intentionally returns HTTP 400 for the isolated Alibaba and Go
+aliases. Use `all_providers` for one-key access to those aliases:
+
+```bash
+curl https://YOUR_HOST/v1/chat/completions \
+  -H "Authorization: Bearer $ALL_PROVIDERS_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"alibaba-token-plan-qwen3.7-plus","messages":[{"role":"user","content":"ready"}]}'
+```
+
 Verification for the deployed setup:
 
 - `alibaba-token-plan-qwen3.7-plus` selects account 23 through group 7.
@@ -166,7 +186,7 @@ create synthetic model metadata, pricing, or upstream capability records by
 themselves. Keep channel pricing/model mapping configured for the concrete
 provider platforms that the routes target.
 
-This PR intentionally does not implement:
+Current limitations:
 
 - AUTO smart-routing among multiple providers for the same abstract task.
 - Direct API-key binding to several existing groups without a composite group.

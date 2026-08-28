@@ -152,6 +152,21 @@ When using Docker Compose with `AUTO_SETUP=true`:
 - `schema_migrations` tracks applied migrations (filename + checksum).
 - Migrations are forward-only; rollback requires a DB backup restore or a manual compensating SQL script.
 
+For production backups, dump the live database before account, group, or route
+migrations and protect the local owner API-key file:
+
+```bash
+docker exec -i sub2api-postgres pg_dump -U sub2api -d sub2api --format=custom \
+  --file=/tmp/sub2api-$(date -u +%Y%m%dT%H%M%SZ).dump
+chmod 600 deploy/owner-api-keys.json
+```
+
+Copy the dump out of the container to protected storage and test restoration on
+a separate PostgreSQL instance before relying on it. Do not remove anonymous or
+named PostgreSQL volumes until mounts, row counts, and a verified dump have been
+captured. The provider-group migration evidence and exact restore snapshot are
+documented in [`PRICING_MAPPING_RUNBOOK.md`](../PRICING_MAPPING_RUNBOOK.md#12-dedicated-provider-groups-and-client-migration--2026-08-28).
+
 **Verify `users.allowed_groups` → `user_allowed_groups` backfill**
 
 During the incremental GORM→Ent migration, `users.allowed_groups` (legacy `BIGINT[]`) is being replaced by a normalized join table `user_allowed_groups(user_id, group_id)`.

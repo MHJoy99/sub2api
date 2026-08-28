@@ -427,7 +427,10 @@ Created group 7 through `POST /api/v1/admin/groups` with this effective request:
 }
 ```
 
-The service copied and deduplicated eight active accounts into `account_groups`:
+The service copied and deduplicated eight account memberships into `account_groups`.
+Seven are currently active and schedulable; account 6 is retained for historical
+Zen compatibility but remains `error` and unschedulable until its credential is
+repaired:
 
 ```sql
 SELECT ag.account_id, a.platform
