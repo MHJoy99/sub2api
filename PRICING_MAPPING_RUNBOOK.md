@@ -239,3 +239,72 @@ Code rollback: `git checkout -- backend/internal/service/billing_service.go back
 3. `curl http://127.0.0.1:8086/health` must be `{"status":"ok"}` and `docker logs sub2api` must contain no `ErrModelPricingUnavailable` for the mapped models.
 4. In the UI, filter Usage Records by `Model = alibaba-token-plan-qwen3.8-max` and `gemini-3.7-flash-tiered` for Last 7 Days — both must show `Actual = Standard > $0`.
 5. Do not re-run the UPDATE blindly: it is `WHERE total_cost=0` idempotent, but re-running will not double-charge. The ledger (`billing_usage_entries`) is intentionally not touched.
+
+## 9) Incident 2026-08-28: postgres data loss during pricing deploy (and recovery)
+
+**Symptom:** after `docker compose up -d` with the new image, `users/api_keys/usage_logs` counts dropped to 0 and the Usage page showed "No data available".
+
+**Root cause:** the long-running `sub2api-postgres` container predated the compose `PGDATA=/var/lib/postgresql/data` fix (`deploy/docker-compose.yml:252`). Its live dataset lived in the image-declared anonymous volume at `/var/lib/postgresql`; the named volume `deploy_postgres_data` held only a stale 2026-07-29 initdb. Recreating the stack switched PGDATA to the (empty) named volume. The Aug 20–28 slice existed only in the orphaned anonymous volume and is **unrecoverable** once the container/volume is removed.
+
+**Recovery performed (repeatable):**
+
+```bash
+docker compose -f deploy/docker-compose.yml down
+docker volume rm <orphan-anon-volume>          # ONLY after confirming it holds no data
+docker compose -f deploy/docker-compose.yml up -d postgres
+docker exec -i sub2api-postgres psql -U sub2api -d postgres -c "DROP DATABASE IF EXISTS sub2api WITH (FORCE);" -c "CREATE DATABASE sub2api OWNER sub2api;"
+cat deploy/sub2api-20260729T074814Z-before-wsv2.sql | docker exec -i sub2api-postgres psql -U sub2api -d sub2api   # 0 errors
+docker cp sub2api_usage_full.csv sub2api-postgres:/tmp/full.csv
+# temp-table \copy + INSERT ... JOIN api_keys/accounts (placeholders for missing accounts: status='inactive', schedulable=false)
+docker compose -f deploy/docker-compose.yml up -d   # app runs migrations 190 -> latest
+cat deploy/backfill_usage_costs.sql | docker exec -i sub2api-postgres psql -U sub2api -d sub2api
+# dashboard refresh: jwtgen (CGO_ENABLED=0!) + POST /api/v1/admin/dashboard/aggregation/backfill
+```
+
+**Result:** 60,518 usage rows (Jul 29 → Aug 20 10:29 +06), `$0` token rows = 0, `actual_cost` sum $2,081.87; login/API keys/groups/accounts restored; 7 inactive placeholder accounts (ids 8–22) for FK integrity. **Lost forever:** Aug 20–28 usage + any api_keys/accounts created in that window (e.g. the `joy` key) — clients must mint new keys; old secrets are unrecoverable.
+
+**Prevention rule:** before recreating `sub2api-postgres` or removing ANY orphan volume, take a `pg_dump` from the RUNNING container first. Never `docker volume rm` a postgres anonymous volume without verifying `base/<dboid>` size.
+
+## 10) Restoring lost model routing (composite_model_routes) — 2026-08-28
+
+After DB restore, clients got `model_not_found` / placeholders cluttered accounts. Fixed via:
+
+```sql
+DELETE FROM accounts WHERE name LIKE 'restored-placeholder-%';
+UPDATE accounts SET schedulable=true, status='active' WHERE id BETWEEN 1 AND 7;
+INSERT INTO composite_model_routes (group_id, public_model, match_type, target_platform, upstream_model, endpoint, priority, enabled, notes) VALUES
+ (4,'gemini-3.7-flash-tiered','exact','antigravity','gemini-3.7-flash-tiered','any',10,true,'Restored'),
+ (4,'joyvoice-fast-audio','exact','antigravity','gemini-2.5-flash','any',10,true,'Restored'),
+ (4,'tab_flash_lite_preview','exact','antigravity','tab_flash_lite_preview','any',10,true,'Restored'),
+ (4,'alibaba-token-plan-qwen3.8-max','exact','openai','qwen3.8-max','any',10,true,'Restored'),
+ -- ... plus go-muse-spark-1.2[-contributor], go-mimo-v2.5, go-ox-alpha-free, go-qwen3.*, go-glm-5,
+ -- go-deepseek-v4-*, alibaba-token-plan-qwen3.7-plus/3.7-max/3.6-flash/glm-5.2/deepseek-*, luna aliases
+```
+
+Route format reference: `.luna-route-backup-20260822152445.json`. `target_platform` must be in
+('anthropic','openai','gemini','antigravity','grok','kimi','zhipu','deepseek') (migration 227).
+
+**Code side:** `composite_model_routes` alone is not enough — the antigravity scheduler also requires the model in the platform catalog. Restored `gemini-3.7-flash-tiered` in:
+`backend/internal/pkg/antigravity/claude_types.go:186`, `backend/internal/domain/constants.go:147`, `backend/internal/service/account.go:665`. Verified live: `POST /v1/chat/completions {"model":"gemini-3.7-flash-tiered"}` → 200 "ok", usage row billed $0.000199 at the 0.75/3.75 card.
+
+**Final provider state:** Alibaba account 23 and OpenCode Go account 24 are bound to group 4 and claim exact public aliases through `credentials.model_mapping`. The broad `target_platform='openai'` composite routes were removed because explicit composite routes bypass account ownership and select the wrong OpenAI-compatible account. Both accounts use `extra.openai_responses_mode='force_chat_completions'`.
+
+## 11) Owner-provided provider keys — 2026-08-28
+
+Two provider accounts were created without storing secrets in this runbook:
+
+| Account | DB id | Base URL | Ownership |
+|---|---:|---|---|
+| Alibaba Token Plan | 23 | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` | `alibaba-token-plan-*` aliases → Alibaba model IDs |
+| OpenCode Go | 24 | `https://opencode.ai/zen/go/v1` | current Go catalog → `go-*` aliases |
+
+The account mappings are exact, for example `alibaba-token-plan-qwen3.8-max` → `qwen3.8-max` and `go-qwen3.8-max` → `qwen3.8-max`. They are bound through `account_groups(account_id, group_id, priority)` and must remain `active`, `schedulable=true`.
+
+Verified through the live gateway after restarting to clear the scheduler cache:
+
+* Alibaba `qwen3.8-max` and `qwen3.7-plus` → `200 ok`.
+* Go `qwen3.8-max`, `qwen3.7-plus`, `deepseek-v4-flash`, `glm-5`, `mimo-v2.5`, and `minimax-m3` → `200`.
+* `/v1/models` → 85 models, including all `alibaba-token-plan-*`, current `go-*`, and `gemini-3.7-flash-tiered`.
+* `muse-spark-1.2-contributor` currently returns provider HTTP 500 directly from OpenCode Go; this is upstream-side, not an account-selection failure.
+
+The old `OpenCode Zen` account 6 remains `error`/unschedulable because its previous key returns `Invalid API key`. The provided Go key does not support Zen's `mimo-v2.5-free` / `deepseek-v4-flash-free` IDs. Re-enable account 6 only after supplying a valid Zen key; do not silently map those free aliases to paid Go models.
