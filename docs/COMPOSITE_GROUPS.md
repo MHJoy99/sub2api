@@ -14,6 +14,9 @@ Composite groups can route to these concrete account platforms:
 - OpenAI
 - Antigravity
 - Grok
+- Kimi
+- Zhipu
+- DeepSeek
 
 The selected concrete platform is used for account selection, user platform
 quota checks, post-usage billing, ops error platform attribution, channel
@@ -68,6 +71,9 @@ Composite routing detects common public model IDs and provider-prefixed IDs:
 - `gpt-*`, `o*`, `codex-*`, `text-embedding-*`, `dall-e-*`, and
   `openai/*` route to OpenAI.
 - `grok-*` and `xai/grok-*` route to Grok.
+- `kimi-*`, `moonshot/*`, and `k3` route to Kimi.
+- `glm-*` and `zhipu/*` route to Zhipu.
+- `deepseek-*` and `deepseek/*` route to DeepSeek.
 
 Unknown or ambiguous model names fail closed with a client error instead of
 guessing a provider.
@@ -116,6 +122,42 @@ The same composite group can also rely on built-in detection for standard model
 names such as `gpt-*`, `claude-*`, `gemini-*`, and `grok-*`. Explicit routes are
 recommended for bundled plan aliases because they make endpoint, provider, and
 upstream model attribution reviewable in the admin UI.
+
+## Production Setup: All Providers
+
+As of 2026-08-28, the production instance uses separate provider groups plus a
+full-access composite group:
+
+| Group | ID | Purpose | Accounts | Routes |
+| --- | ---: | --- | ---: | ---: |
+| `All Models` | 4 | Existing unified client access | 6 | 8 |
+| `Alibaba Token Plan` | 5 | Isolated Alibaba Token Plan account | 1 | 0 |
+| `OpenCode Go` | 6 | Isolated OpenCode Go account | 1 | 0 |
+| `All Providers` | 7 | One-key access across all configured providers | 8 | 52 |
+
+Group 7 copies accounts from groups 4, 5, and 6 and uses exact routes for the
+44 Alibaba and Go aliases. The route target is `openai`, but the route leaves
+the upstream model at the public alias so account 23 or 24 can apply its own
+account-level mapping. Do not replace these exact routes with one broad
+`target_platform=openai` route: both OpenAI-compatible accounts expose some of
+the same bare upstream model names, and broad routing can select the wrong
+provider.
+
+The owner full-access key is stored locally as `all_providers` in the
+mode-600, git-ignored `deploy/owner-api-keys.json`. The existing `all_models`
+key remains bound to group 4, while `alibaba_token_plan` and `opencode_go`
+remain available for provider-isolated clients. API keys bind to one group;
+use group 7 when a client needs one key for all configured models.
+
+Verification for the deployed setup:
+
+- `alibaba-token-plan-qwen3.7-plus` selects account 23 through group 7.
+- `go-glm-5` selects account 24 through group 7.
+- `gemini-3.7-flash-tiered` selects the antigravity pool through group 7.
+- `GET /v1/models` through the group-7 key returns 85 models.
+
+The detailed migration record, database checks, backup path, and API payloads
+are maintained in [`PRICING_MAPPING_RUNBOOK.md`](../PRICING_MAPPING_RUNBOOK.md).
 
 ## Limits
 

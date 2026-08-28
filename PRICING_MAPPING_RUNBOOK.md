@@ -287,7 +287,7 @@ Route format reference: `.luna-route-backup-20260822152445.json`. `target_platfo
 **Code side:** `composite_model_routes` alone is not enough — the antigravity scheduler also requires the model in the platform catalog. Restored `gemini-3.7-flash-tiered` in:
 `backend/internal/pkg/antigravity/claude_types.go:186`, `backend/internal/domain/constants.go:147`, `backend/internal/service/account.go:665`. Verified live: `POST /v1/chat/completions {"model":"gemini-3.7-flash-tiered"}` → 200 "ok", usage row billed $0.000199 at the 0.75/3.75 card.
 
-**Final provider state:** Alibaba account 23 and OpenCode Go account 24 are bound to group 4 and claim exact public aliases through `credentials.model_mapping`. The broad `target_platform='openai'` composite routes were removed because explicit composite routes bypass account ownership and select the wrong OpenAI-compatible account. Both accounts use `extra.openai_responses_mode='force_chat_completions'`.
+**Historical provider state before isolation:** Alibaba account 23 and OpenCode Go account 24 were bound to group 4 and claimed exact public aliases through `credentials.model_mapping`. The broad `target_platform='openai'` composite routes were removed because explicit composite routes bypass account ownership and select the wrong OpenAI-compatible account. Both accounts use `extra.openai_responses_mode='force_chat_completions'`.
 
 ## 11) Owner-provided provider keys — 2026-08-28
 
@@ -298,7 +298,7 @@ Two provider accounts were created without storing secrets in this runbook:
 | Alibaba Token Plan | 23 | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` | `alibaba-token-plan-*` aliases → Alibaba model IDs |
 | OpenCode Go | 24 | `https://opencode.ai/zen/go/v1` | current Go catalog → `go-*` aliases |
 
-The account mappings are exact, for example `alibaba-token-plan-qwen3.8-max` → `qwen3.8-max` and `go-qwen3.8-max` → `qwen3.8-max`. They are bound through `account_groups(account_id, group_id, priority)` and must remain `active`, `schedulable=true`.
+The account mappings are exact, for example `alibaba-token-plan-qwen3.8-max` → `qwen3.8-max` and `go-qwen3.8-max` → `qwen3.8-max`. They were initially bound to group 4 and are now isolated in groups 5 and 6 as documented below. They must remain `active`, `schedulable=true`.
 
 Verified through the live gateway after restarting to clear the scheduler cache:
 
@@ -308,3 +308,182 @@ Verified through the live gateway after restarting to clear the scheduler cache:
 * `muse-spark-1.2-contributor` currently returns provider HTTP 500 directly from OpenCode Go; this is upstream-side, not an account-selection failure.
 
 The old `OpenCode Zen` account 6 remains `error`/unschedulable because its previous key returns `Invalid API key`. The provided Go key does not support Zen's `mimo-v2.5-free` / `deepseek-v4-flash-free` IDs. Re-enable account 6 only after supplying a valid Zen key; do not silently map those free aliases to paid Go models.
+
+## 12) Dedicated provider groups and client migration - 2026-08-28
+
+### 12.1 Safety snapshot
+
+Before changing live bindings, the running PostgreSQL container was verified healthy and its mounts were captured:
+
+```text
+container d530f420ffe2, postgres:18-alpine, healthy
+anonymous volume a484e1457b3150120c0f323ab430a373b61f10cf8edf84ee9f8ca6ba5d08c04a -> /var/lib/postgresql
+named volume deploy_postgres_data -> /var/lib/postgresql/data
+```
+
+The database was dumped before writes:
+
+```bash
+docker exec -i sub2api-postgres pg_dump -U sub2api -d sub2api --format=custom --file=/tmp/provider-group-isolation-20260828.dump
+docker cp sub2api-postgres:/tmp/provider-group-isolation-20260828.dump /tmp/kilo/provider-group-isolation-20260828.dump
+```
+
+Pre-change counts were 2 users, 5 API keys, 8 non-deleted accounts, 4 groups, and 46,282 usage rows. No container restart, volume removal, database drop, or restore was performed.
+
+### 12.2 Groups and accounts
+
+Created through the admin API (`POST /api/v1/admin/groups`), not direct SQL:
+
+| Group | DB id | Platform | Type | Image gate | OAuth-only | Account |
+|---|---:|---|---|---|---|---:|
+| Alibaba Token Plan | 5 | `openai` | `subscription` | enabled | disabled | 23 |
+| OpenCode Go | 6 | `openai` | `subscription` | enabled | disabled | 24 |
+
+The `require_oauth_only=false` setting is required because accounts 23 and 24 are API-key accounts. Group 5 image generation was enabled after creation for the mapped `wan2.7-image` and `wan2.7-image-pro` models.
+
+Owner subscriptions were assigned to user 1 through `POST /api/v1/admin/subscriptions/assign`, valid through `2100-01-01`, as subscriptions are required when creating group-bound API keys. Account bindings were then updated through `PUT /api/v1/admin/accounts/:id`:
+
+```json
+{"group_ids":[5]}
+{"group_ids":[6]}
+```
+
+The resulting strict ownership is:
+
+```sql
+SELECT ag.account_id, ag.group_id, g.name, g.platform, a.status, a.schedulable
+FROM account_groups ag
+JOIN groups g ON g.id = ag.group_id
+JOIN accounts a ON a.id = ag.account_id
+WHERE ag.account_id IN (23, 24)
+ORDER BY ag.account_id;
+-- 23 | 5 | Alibaba Token Plan | openai | active | true
+-- 24 | 6 | OpenCode Go        | openai | active | true
+```
+
+Neither account remains in group 4. The application paths that implement this behavior are `backend/internal/service/admin_group.go:1121` for API-key group policy, `backend/internal/repository/group_repo.go:161` for atomic group/account copying, and `backend/internal/handler/admin/account_handler.go:953` for account group updates.
+
+### 12.3 Client access decision
+
+The live group-4 key is API key id 3 and remains bound to group 4. It was heavily used for the unified client and was not moved. API key id 4 was already soft-deleted before this migration. Since `api_keys.group_id` is singular, one key cannot simultaneously route to groups 4, 5, and 6.
+
+Two permanent owner keys were created through `POST /api/v1/keys` and stored mode `600` in the existing git-ignored `deploy/owner-api-keys.json`:
+
+| Key name | API key id | Group |
+|---|---:|---:|
+| `Owner Alibaba Token Plan` | 8 | 5 |
+| `Owner OpenCode Go` | 9 | 6 |
+
+Do not copy the secret values into source-controlled documentation. Existing unified clients keep using the `all_models` key for group-4 models; Alibaba aliases must use `alibaba_token_plan`, and Go aliases must use `opencode_go` from the local ignored owner-key file.
+
+### 12.4 Live verification
+
+Temporary group-bound keys were created, tested, and soft-deleted before permanent keys were created. The temporary checks returned HTTP 200 and logged account 23 for `alibaba-token-plan-qwen3.7-plus` and account 24 for `go-glm-5`.
+
+Permanent-key checks returned:
+
+```text
+Alibaba group 5: POST /v1/chat/completions alibaba-token-plan-qwen3.7-plus -> HTTP 200, upstream model qwen3.7-plus
+Go group 6:       POST /v1/chat/completions go-glm-5                  -> HTTP 200, upstream model glm-5
+Group 4 legacy:   POST /v1/chat/completions gemini-3.7-flash-tiered     -> HTTP 200
+```
+
+Model catalog checks returned 13 Alibaba aliases for group 5 and 31 Go aliases for group 6. The preserved group-4 key correctly returns `400 Model is not supported by composite groups` for the now-isolated Alibaba and Go aliases; this is intentional strict isolation, and clients must switch those requests to the dedicated keys.
+
+Final database verification:
+
+```sql
+SELECT g.id, g.name,
+       (SELECT COUNT(*) FROM account_groups ag WHERE ag.group_id = g.id) AS accounts,
+       (SELECT COUNT(*) FROM api_keys ak WHERE ak.group_id = g.id AND ak.deleted_at IS NULL) AS live_api_keys
+FROM groups g WHERE g.id IN (4, 5, 6) ORDER BY g.id;
+-- 4 | All Models         | 6 | 1
+-- 5 | Alibaba Token Plan | 1 | 1
+-- 6 | OpenCode Go        | 1 | 1
+```
+
+`GET /health` returned `{"status":"ok"}`. No panic or fatal service log appeared during the migration, and post-migration usage recorded group 5/account 23 and group 6/account 24 with zero requests for those accounts remaining under group 4.
+
+## 13) Full-access composite provider group - 2026-08-28
+
+The strict provider groups remain available, while a separate composite group provides one-key access to all configured providers. This avoids changing the existing group-4 client key and avoids putting Alibaba or Go accounts back into the legacy group.
+
+### 13.1 Group and account population
+
+Created group 7 through `POST /api/v1/admin/groups` with this effective request:
+
+```json
+{
+  "name": "All Providers",
+  "description": "Full-access composite gateway for all configured provider pools",
+  "platform": "composite",
+  "rate_multiplier": 1,
+  "is_exclusive": false,
+  "subscription_type": "subscription",
+  "long_context_pricing_enabled": true,
+  "allow_image_generation": true,
+  "require_oauth_only": false,
+  "copy_accounts_from_group_ids": [4, 5, 6]
+}
+```
+
+The service copied and deduplicated eight active accounts into `account_groups`:
+
+```sql
+SELECT ag.account_id, a.platform
+FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
+WHERE ag.group_id = 7 ORDER BY ag.account_id;
+-- 1/antigravity, 3/antigravity, 4/antigravity, 5/openai,
+-- 6/openai, 7/antigravity, 23/openai, 24/openai
+```
+
+An owner subscription was assigned as `user_subscriptions.id=6`, valid through `2100-01-01`. The admin implementation supports copying composite and concrete provider groups in `backend/internal/service/admin_group.go:423` and validates composite-only routes in `backend/internal/service/admin_group.go:183`.
+
+### 13.2 Exact composite routes
+
+The eight existing group-4 routes were copied to group 7. Forty-four exact routes were added from the account mappings in accounts 23 and 24:
+
+```text
+POST /api/v1/admin/groups/7/composite-routes
+{"public_model":"<account alias>","match_type":"exact","target_platform":"openai","endpoint":"any","priority":20,"enabled":true}
+```
+
+For exact routes, the application persists an empty `upstream_model` as the public alias (`backend/internal/service/composite_model_route.go:126`). This is intentional: the composite scheduler selects the account by its exact alias, then account 23 or 24 applies its own `credentials.model_mapping` to produce the correct upstream model. Hardcoding the shared bare model (for example `qwen3.7-plus`) would allow the wrong OpenAI-compatible account to be selected.
+
+The resulting group has 52 enabled routes. Route creation is exposed at `backend/internal/server/routes/admin.go:337` and handled by `backend/internal/handler/admin/group_handler.go:300`.
+
+### 13.3 Full-access key
+
+Created through `POST /api/v1/keys`:
+
+| Key name | API key id | Group |
+|---|---:|---:|
+| `Owner All Providers` | 10 | 7 |
+
+The secret is stored as `all_providers` in mode-600, git-ignored `deploy/owner-api-keys.json`. Existing `all_models` remains unchanged on group 4. Dedicated keys remain `alibaba_token_plan` for group 5 and `opencode_go` for group 6.
+
+### 13.4 Verification
+
+The full-access key returned HTTP 200 for all of these requests:
+
+```text
+alibaba-token-plan-qwen3.7-plus -> group 7, account 23, upstream qwen3.7-plus
+go-glm-5                       -> group 7, account 24, upstream glm-5
+gemini-3.7-flash-tiered         -> group 7, account 4
+```
+
+`GET /v1/models` through key 10 returned 85 models, including 13 Alibaba aliases, 31 Go aliases, and `gemini-3.7-flash-tiered`. Final state is verified with:
+
+```sql
+SELECT g.id, g.name,
+       (SELECT COUNT(*) FROM account_groups ag WHERE ag.group_id = g.id) AS accounts,
+       (SELECT COUNT(*) FROM composite_model_routes r WHERE r.group_id = g.id AND r.enabled) AS routes,
+       (SELECT COUNT(*) FROM api_keys k WHERE k.group_id = g.id AND k.deleted_at IS NULL) AS live_keys
+FROM groups g WHERE g.id IN (4, 5, 6, 7) ORDER BY g.id;
+-- 4 | All Models         | 6 | 8  | 1
+-- 5 | Alibaba Token Plan | 1 | 0  | 1
+-- 6 | OpenCode Go        | 1 | 0  | 1
+-- 7 | All Providers      | 8 | 52 | 1
+```
+
+`GET /health` and both Docker health checks remain healthy. The implementation uses the group-scoped scheduler and composite resolver in `backend/internal/service/gateway_scheduling.go:40` and `backend/internal/service/composite_route_resolver.go:25`.
