@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
@@ -3245,6 +3246,7 @@ func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {
 		}
 	}
 	out["contents"] = contents
+	out["safetySettings"] = antigravity.DefaultSafetySettings
 
 	if tools := convertClaudeToolsToGeminiTools(req["tools"]); tools != nil {
 		out["tools"] = tools
@@ -3779,6 +3781,18 @@ func convertClaudeGenerationConfig(req map[string]any) map[string]any {
 	}
 	if stopSeq, ok := req["stop_sequences"].([]any); ok && len(stopSeq) > 0 {
 		out["stopSequences"] = stopSeq
+	}
+	if thinking, ok := req["thinking"].(map[string]any); ok {
+		thinkingType, _ := thinking["type"].(string)
+		if thinkingType == "enabled" || thinkingType == "adaptive" {
+			tc := map[string]any{
+				"includeThoughts": true,
+			}
+			if budget, ok := asInt(thinking["budget_tokens"]); ok && budget > 0 {
+				tc["thinkingBudget"] = budget
+			}
+			out["thinkingConfig"] = tc
+		}
 	}
 	if len(out) == 0 {
 		return nil

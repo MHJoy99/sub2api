@@ -18,6 +18,7 @@ WITH cards(model, i, o, cr) AS (VALUES
   ('joyvoice-fast-audio', 0.3e-6, 2.5e-6, 0.03e-6),
   ('go-muse-spark-1.2', 1.25e-6, 4.25e-6, 0.15e-6),
   ('go-muse-spark-1.2-contributor', 0.1e-6, 0.2e-6, 0.002e-6),
+  ('go-muse-spark-1.3-contributor', 0.1e-6, 0.2e-6, 0.002e-6),
   ('go-mimo-v2.5', 0.1e-6, 0.3e-6, 0.02e-6),
   ('gpt-oss-120b-medium', 0.15e-6, 0.6e-6, 0.03e-6)
 )

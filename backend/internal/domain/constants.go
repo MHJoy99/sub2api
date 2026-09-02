@@ -145,6 +145,11 @@ var DefaultAntigravityModelMapping = map[string]string{
 	"gemini-3.6-flash-medium": "gemini-3.6-flash-medium",
 	"gemini-3.6-flash-tiered": "gemini-3.6-flash-tiered",
 	"gemini-3.7-flash-tiered": "gemini-3.7-flash-tiered",
+	// Models currently reported by Antigravity OAuth fetchAvailableModels.
+	"gemini-3-flash-agent":       "gemini-3-flash-agent",
+	"gemini-3.1-flash-lite":      "gemini-3.1-flash-lite",
+	"gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
+	"gemini-3.5-flash-low":       "gemini-3.5-flash-low",
 	// Gemini 3 image 兼容映射（向 3.1 image 迁移）
 	"gemini-3-pro-image":         "gemini-3.1-flash-image",
 	"gemini-3-pro-image-preview": "gemini-3.1-flash-image",

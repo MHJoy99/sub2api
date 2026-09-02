@@ -333,6 +333,25 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     false,
 	}
 
+	// Gemini 3.1 Flash Lite (Google AI pricing: $0.25 input / $1.50 output /
+	// $0.025 cached input per MTok).
+	s.fallbackPrices["gemini-3.1-flash-lite"] = &ModelPricing{
+		InputPricePerToken:     0.25e-6,
+		OutputPricePerToken:    1.5e-6,
+		CacheReadPricePerToken: 0.025e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 3.5 Flash and the Antigravity effort aliases reported by
+	// fetchAvailableModels ($1.50 input / $9.00 output / $0.15 cached input
+	// per MTok).
+	s.fallbackPrices["gemini-3.5-flash"] = &ModelPricing{
+		InputPricePerToken:     1.5e-6,
+		OutputPricePerToken:    9e-6,
+		CacheReadPricePerToken: 0.15e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// Gemini 3.6 Flash (Google AI pricing: $1.50 input / $7.50 output /
 	// $0.15 cached input per MTok). Antigravity's -high/-low/-medium/-tiered
 	// aliases are matched below so unavailable remote pricing never records
@@ -862,6 +881,16 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     false,
 	}
 
+	// Muse Spark 1.3 contributor tier keeps the same OpenCode Go pricing as
+	// 1.2, but is served through the Responses API.
+	s.fallbackPrices["muse-spark-1.3-contributor"] = &ModelPricing{
+		InputPricePerToken:         0.1e-6,
+		OutputPricePerToken:        0.2e-6,
+		CacheCreationPricePerToken: 0.1e-6,
+		CacheReadPricePerToken:     0.002e-6,
+		SupportsCacheBreakdown:     false,
+	}
+
 	// Ox Alpha free tier bills at $0 (explicit zero card so the alias is
 	// identified and never falls through to a guessed family price).
 	s.fallbackPrices["ox-alpha-free"] = &ModelPricing{
@@ -927,6 +956,12 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.1-pro") || strings.Contains(modelLower, "gemini-3-1-pro") {
 		return s.fallbackPrices["gemini-3.1-pro"]
 	}
+	if strings.Contains(modelLower, "gemini-3.1-flash-lite") || strings.Contains(modelLower, "gemini-3-1-flash-lite") {
+		return s.fallbackPrices["gemini-3.1-flash-lite"]
+	}
+	if strings.Contains(modelLower, "gemini-3.5-flash") || modelLower == "gemini-3-flash-agent" {
+		return s.fallbackPrices["gemini-3.5-flash"]
+	}
 	if strings.Contains(modelLower, "gemini-3.6-flash") || strings.Contains(modelLower, "gemini-3-6-flash") {
 		return s.fallbackPrices["gemini-3.6-flash"]
 	}
@@ -982,7 +1017,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.getFallbackPricing(stripped)
 	}
 
-	// Muse Spark composite slugs (go-muse-spark-1.2[-contributor]).
+	// Muse Spark composite slugs (go-muse-spark-1.2/1.3[-contributor]).
+	if strings.Contains(modelLower, "muse-spark-1.3-contributor") {
+		return s.fallbackPrices["muse-spark-1.3-contributor"]
+	}
 	if strings.Contains(modelLower, "muse-spark-1.2-contributor") {
 		return s.fallbackPrices["muse-spark-1.2-contributor"]
 	}

@@ -633,3 +633,24 @@ func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
 		require.NotContains(t, raw, "includeServerSideToolInvocations")
 	})
 }
+
+func TestTransformClaudeToGeminiWithOptions_IncludesDefaultSafetySettings(t *testing.T) {
+	claudeReq := &ClaudeRequest{
+		Model: "gemini-3.7-flash-tiered",
+		Messages: []ClaudeMessage{
+			{
+				Role:    "user",
+				Content: json.RawMessage(`"test prompt"`),
+			},
+		},
+	}
+	body, err := TransformClaudeToGeminiWithOptions(claudeReq, "project-1", "gemini-3.7-flash-tiered", DefaultTransformOptions())
+	require.NoError(t, err)
+
+	var req V1InternalRequest
+	require.NoError(t, json.Unmarshal(body, &req))
+	require.Len(t, req.Request.SafetySettings, 5)
+	for _, ss := range req.Request.SafetySettings {
+		require.Equal(t, "OFF", ss.Threshold)
+	}
+}

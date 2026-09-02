@@ -144,7 +144,8 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	innerRequest := GeminiRequest{
 		Contents: contents,
 		// 总是生成 sessionId，基于用户消息内容
-		SessionID: generateStableSessionID(contents),
+		SessionID:      generateStableSessionID(contents),
+		SafetySettings: DefaultSafetySettings,
 	}
 
 	// 针对 Gemini Reasoning 模型（如 gemini-3.1-pro-high等）过滤强制空 ToolConfig

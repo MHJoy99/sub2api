@@ -49,7 +49,8 @@ Per-row regression on `sub2api_usage_full.csv` confirmed every non-zero row matc
 | `qwen3.7-plus` / `-max` / `go-qwen3.7-plus` | 0.40 | 1.20 | 0.05 | DashScope |
 | `qwen3.6-flash` | 0.10 | 0.40 | 0.01 | DashScope |
 | `muse-spark-1.2` / `go-muse-spark-1.2` / `muse-spark-1.1` | 1.25 | 4.25 | 0.15 | Bundled catalog + fallback |
-| `muse-spark-1.2-contributor` / `go-muse-spark-1.2-contributor` | 0.10 | 0.20 | 0.002 | Contributor tier |
+| `muse-spark-1.2-contributor` / `go-muse-spark-1.2-contributor` | 0.10 | 0.20 | 0.002 | Legacy Contributor tier; retained for historical billing |
+| `muse-spark-1.3-contributor` / `go-muse-spark-1.3-contributor` | 0.10 | 0.20 | 0.002 | Current OpenCode Go Contributor tier; Responses API |
 | `mimo-v2.5` / `go-mimo-v2.5` | 0.10 | 0.30 | 0.02 | Xiaomi |
 | `gpt-oss-120b` / `gpt-oss-120b-medium` | 0.15 | 0.60 | 0.03 | OpenAI open-weights (Fireworks/hosted) |
 | `deepseek-v4-flash` / `alibaba-token-plan-deepseek-v4-flash-0731` / `accounts/fireworks/models/deepseek-v4-flash-0731` | 0.14 | 0.28 | 0.0028 | DeepSeek (existing) |
@@ -64,7 +65,7 @@ All future requests are fixed by code + catalog; no per-group DB config needed.
 
 ### 4.1 `backend/internal/service/billing_service.go`
 
-* `initFallbackPricing()` — added fallback entries: `gemini-3.7-flash`, `gemini-3-pro-preview`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `qwen3.8-max`, `qwen3.7-plus`, `qwen3.6-flash`, `mimo-v2.5`, `gpt-oss-120b`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `joyvoice-fast-audio`, `ox-alpha-free`.
+* `initFallbackPricing()` — added fallback entries: `gemini-3.7-flash`, `gemini-3-pro-preview`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `qwen3.8-max`, `qwen3.7-plus`, `qwen3.6-flash`, `mimo-v2.5`, `gpt-oss-120b`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`, `joyvoice-fast-audio`, `ox-alpha-free`.
 * `stripCompositeBillingPrefix()` — new helper; strips `alibaba-token-plan-` and `go-` then re-resolves the bare upstream model so `alibaba-token-plan-qwen3.8-max` → `qwen3.8-max`, `go-muse-spark-1.2` → `muse-spark-1.2`, `alibaba-token-plan-deepseek-v4-flash-0731` → `deepseek-v4-flash`, etc. Placed **after** the DeepSeek exact-match block.
 * `getFallbackPricing()` — added rules: `gemini-3.7-flash`, `gemini-3-pro` family (covers `-high`/`-low`/`-preview`/`gemini-pro-agent`), `gemini-2.5-flash-lite`, `gemini-2.5-flash` (covers `-thinking`), `joyvoice`, `gpt-oss-120b`, `qwen3.8-max` exact, `muse-spark-*`, `ox-alpha-free`, `qwen3.7`/`qwen3.6`/`mimo` bare-name rules.
 
@@ -78,7 +79,7 @@ Key invariant: pricing resolution is `Group → Channel → LiteLLM catalog → 
 
 Text-inserted 8 deleted keys from `backup-ours-20260824-043027` preserving original formatting (`1.25e-6` not `1.25e-06`):
 
-`muse-spark-1.2`, `go-muse-spark-1.2`, `muse-spark-1.2-contributor`, `go-muse-spark-1.2-contributor`, `muse-spark-1.1`, `go-muse-spark-1.1`, `ox-alpha-free`, `go-ox-alpha-free`.
+`muse-spark-1.2`, `go-muse-spark-1.2`, `muse-spark-1.2-contributor`, `go-muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`, `go-muse-spark-1.3-contributor`, `muse-spark-1.1`, `go-muse-spark-1.1`, `ox-alpha-free`, `go-ox-alpha-free`.
 
 ### 4.4 Tests
 
@@ -203,7 +204,7 @@ docker exec -i sub2api-postgres psql -U sub2api -d sub2api -c "
 
 Edge cases verified:
 * `accounts/fireworks/models/deepseek-v4-flash-0731` — `lastSegment` + `deepseek-v4-flash` contains → billed via existing rule.
-* `go-*` / `alibaba-token-plan-*` — stripped then re-resolved; `go-muse-spark-1.2-contributor` checked before `muse-spark-1.2`.
+* `go-*` / `alibaba-token-plan-*` — stripped then re-resolved; `go-muse-spark-1.3-contributor` and the legacy `go-muse-spark-1.2-contributor` are checked before standard Muse Spark family matching.
 * `gemini-3-pro-image` — not stolen by the `gemini-3-pro` family rule because the LiteLLM catalog hit wins first (has image price + `TokenPricingAbsent` guard).
 * Image/video/per_request modes — `billing_mode` guard skips them.
 * Ox free tier — explicit zero card so `HasIdentifiedTokenPricing` returns true at $0 and never guesses a family price.
@@ -305,7 +306,7 @@ Verified through the live gateway after restarting to clear the scheduler cache:
 * Alibaba `qwen3.8-max` and `qwen3.7-plus` → `200 ok`.
 * Go `qwen3.8-max`, `qwen3.7-plus`, `deepseek-v4-flash`, `glm-5`, `mimo-v2.5`, and `minimax-m3` → `200`.
 * `/v1/models` → 85 models, including all `alibaba-token-plan-*`, current `go-*`, and `gemini-3.7-flash-tiered`.
-* `muse-spark-1.2-contributor` currently returns provider HTTP 500 directly from OpenCode Go; this is upstream-side, not an account-selection failure.
+* The previous OpenCode Go `muse-spark-1.2-contributor` route was forced through Chat Completions and had returned provider HTTP 500. OpenCode's current Go catalog lists `muse-spark-1.3-contributor` on `/v1/responses`; the live account-24 probe completed successfully with the new model.
 
 The old `OpenCode Zen` account 6 remains `error`/unschedulable because its previous key returns `Invalid API key`. The provided Go key does not support Zen's `mimo-v2.5-free` / `deepseek-v4-flash-free` IDs. Re-enable account 6 only after supplying a valid Zen key; do not silently map those free aliases to paid Go models.
 
@@ -490,3 +491,70 @@ FROM groups g WHERE g.id IN (4, 5, 6, 7) ORDER BY g.id;
 ```
 
 `GET /health` and both Docker health checks remain healthy. The implementation uses the group-scoped scheduler and composite resolver in `backend/internal/service/gateway_scheduling.go:40` and `backend/internal/service/composite_route_resolver.go:25`.
+
+## 14) Antigravity OAuth upstream model inventory — 2026-09-03
+
+The public Gemini API documentation lists `gemini-3.8-flash` as GA, but a direct
+read-only `fetchAvailableModels` request returned HTTP 200 for all five local
+Antigravity OAuth accounts and none reported `gemini-3.8-flash`. It is not an
+active Sub2API route until the upstream advertises it:
+<https://ai.google.dev/gemini-api/docs/latest-model>.
+
+The same probe found four public-looking upstream IDs missing from the previous
+Sub2API catalog: `gemini-3-flash-agent`, `gemini-3.1-flash-lite`,
+`gemini-3.5-flash-extra-low`, and `gemini-3.5-flash-low`. They are now exact
+passthrough routes with billing fallbacks. The upstream also returned internal,
+undisplayed IDs `chat_20706`, `chat_23310`, and
+`tab_jump_flash_lite_preview`; those are recorded in the routing runbook but
+not published in the public picker.
+
+The five accounts remain active/schedulable and no credentials or account rows
+were modified. Existing composite groups 4 and 7 already have enabled `gemini-`
+prefix routes targeting Antigravity. Use `deploy/deploy-sub2api.sh` for the
+storage-safe cached deployment. See
+`ANTIGRAVITY_GEMINI_MODEL_ROUTING_RUNBOOK.md` for the complete raw probe and
+verification procedure.
+
+## 15) OpenCode Go Muse Spark 1.3 Contributor replacement — 2026-09-03
+
+OpenCode's official Go catalog now lists both `muse-spark-1.3-contributor` and
+the legacy `muse-spark-1.2-contributor`, with 1.3 served through
+`https://opencode.ai/zen/go/v1/responses`:
+<https://opencode.ai/docs/go/>.
+
+The live OpenCode Go account is account 24 (`https://opencode.ai/zen/go/v1`).
+Using its existing key, a minimal non-streaming request to the official
+`/responses` endpoint returned `model=muse-spark-1.3-contributor`,
+`status=completed`, and no provider error. The first probe used 8 output tokens
+and correctly returned the provider validation error that the minimum is 16;
+the retry used 128 tokens and completed. No secrets are recorded here.
+
+The account was updated through the authenticated admin API, not direct SQL:
+
+- Removed `go-muse-spark-1.2-contributor` from account 24's custom mapping.
+- Added exact `go-muse-spark-1.3-contributor` →
+  `muse-spark-1.3-contributor`.
+- Changed `accounts.extra.openai_responses_mode` to `force_responses` and
+  retained `openai_responses_supported=true`.
+
+The 1.2 pricing cards remain in the catalog for historical usage billing, but
+the active OpenCode Go account now routes the 1.3 Contributor model. Both
+versions use the current Go Contributor card: $0.10 input, $0.20 output, and
+$0.002 cached input per million tokens. The new catalog and fallback card are
+covered by `billing_fallback_mapping_test.go` and
+`pricing_service_test.go`.
+
+Deployment verification for this change:
+
+- Focused Go tests passed: `FallbackPricingCoversCompositeAndUnmappedAliases`
+  and `DefaultPricingIncludesOpenCodeGoMuseSpark13Contributor`.
+- Active image digest:
+  `sha256:d4dea891c24621b6cca878da5c342cf36adccbdf6a15dfb756507841e343d761`.
+- Application health is `healthy`; `/app/data` remains mounted on
+  `deploy_sub2api_data`; PostgreSQL and Redis were not restarted.
+- Authenticated `/v1/models` contains `go-muse-spark-1.3-contributor` and no
+  longer contains `go-muse-spark-1.2-contributor`.
+- Gateway non-streaming verification returned HTTP 200, model
+  `go-muse-spark-1.3-contributor`, content `OK`, and `finish_reason=stop`.
+- Gateway streaming verification returned content `OK`, `finish_reason=stop`,
+  and the terminal `data: [DONE]` marker.
