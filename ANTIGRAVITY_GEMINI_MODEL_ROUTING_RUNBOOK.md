@@ -265,3 +265,18 @@ Faster option (one-line change, not applied): point the alias at
 on noisy audio; A/B against `test.m4a` first. Do NOT point it at
 `gemini-2.5-flash-native-audio-*`: those are AI-Studio-only and the Sep-03
 Antigravity probe did not advertise them, so they would 404 on this path.
+
+## 18) Upstream merge to v0.2.0 — 2026-09-03
+
+Merged `origin/main` (0.1.183 -> 0.2.0, 236 commits, diverged since Aug 26)
+into `ours` with zero conflicts. Trial-merged first in a scratch worktree:
+full `go build ./...` clean, JoyVoice alias/fast-path/billing all intact and
+passing on the merged tree. New upstream migrations 231-233 are schema-only
+`ADD COLUMN IF NOT EXISTS` with behavior-preserving defaults; live DB was at
+230 so they apply on next deploy.
+
+One mechanical fixup: upstream aligned DeepSeek fallback prices to official
+peak/off-peak rates, so `billing_fallback_mapping_test.go` DeepSeek rows were
+updated to the off-peak card (flash $0.22/$0.66/$0.007, pro $0.66/$1.98/$0.022
+per MTok). Live-billing notes: DeepSeek now bills 2x in weekday peak windows,
+and long-context tiers are catalog-data-driven instead of hardcoded.
