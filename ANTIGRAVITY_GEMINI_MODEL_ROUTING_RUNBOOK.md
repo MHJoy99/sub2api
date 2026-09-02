@@ -202,3 +202,66 @@ while `reasoning.effort = xhigh` was accepted and reported reasoning tokens.
 - Added `thinkingConfig` extraction (`includeThoughts: true`, `thinkingBudget: ...`) in `convertClaudeGenerationConfig`.
 - In `StreamingProcessor.emitFinish()`, added explicit fallback notice for `SAFETY` / `BLOCKLIST` when zero content is generated to prevent empty-turn freezes in IDE clients.
 - Deployed and verified healthy via `deploy/deploy-sub2api.sh`.
+
+## 17) JoyVoice `joyvoice-fast-audio` alias restore — 2026-09-03
+
+`joyvoice-fast-audio` is a Sub2API-only custom alias, never an upstream
+Google model. History (`sub2api_usage_full.csv`, 221 rows, last 2026-08-08)
+shows it served as `requested_model` on `/v1/chat/completions` and
+`/chat/completions`, mapped to upstream `gemini-2.5-flash` via
+`/v1internal:streamGenerateContent` at ~1.1-2.1s per transcription. The
+audio fast-path code (`buildAntigravityAudioGeminiBody`, apicompat
+`input_audio` bridges, billing fallback) was intact, but the alias was
+missing from every code catalog, so `/v1/models` and the scheduler dropped
+it after the late-August catalog rebuilds. It now rides the fast path again:
+`input_audio` parts bypass the Claude translation and go direct to Gemini
+`inlineData`.
+
+Code (exact restore, upstream stays `gemini-2.5-flash`):
+
+- `backend/internal/domain/constants.go` — `"joyvoice-fast-audio":
+  "gemini-2.5-flash"` in `DefaultAntigravityModelMapping`.
+- `backend/internal/pkg/antigravity/claude_types.go` — `joyvoice-fast-audio`
+  entry in `geminiModels` (drives `/v1/models` + Gemini `v1beta/models`).
+- `backend/internal/service/account.go` — `applyAntigravityJoyVoiceAlias`
+  fills `joyvoice-fast-audio -> gemini-2.5-flash` on custom-mapped accounts
+  when absent (an identity passthrough would be wrong here: upstream has no
+  `joyvoice-*` model).
+- `frontend/src/composables/useModelWhitelist.ts` — alias in
+  `antigravityModels` so the picker/whitelist does not filter it.
+- Billing needs no change: `billing_service.go` already has the exact
+  `joyvoice-fast-audio` card plus the `strings.Contains(modelLower,
+  "joyvoice")` rule ($0.30/$2.50/$0.03 per MTok).
+
+Live DB (if the composite rows are gone, re-add; group 7 mirrors group 4):
+
+```sql
+INSERT INTO composite_model_routes
+  (group_id, public_model, match_type, target_platform, upstream_model,
+   endpoint, priority, enabled, notes)
+VALUES
+  (4, 'joyvoice-fast-audio', 'exact', 'antigravity', 'gemini-2.5-flash',
+   'any', 10, true, 'Restored'),
+  (7, 'joyvoice-fast-audio', 'exact', 'antigravity', 'gemini-2.5-flash',
+   'any', 10, true, 'Restored')
+ON CONFLICT DO NOTHING;
+```
+
+Verify: `GET /v1/models` lists `joyvoice-fast-audio`; `POST
+/v1/chat/completions {"model":"joyvoice-fast-audio", ...input_audio...}` ->
+200 with a usage row (`requested_model=joyvoice-fast-audio`,
+`upstream_model=gemini-2.5-flash`).
+
+Live-verified 2026-09-03 after `deploy/deploy-sub2api.sh` (image
+`sub2api:deploy-20260902225912-c103d4bb4`, `/app/data` preserved): model
+list went 76 -> 77 with `joyvoice-fast-audio` present; a minimal WAV
+`input_audio` transcription returned HTTP 200, upstream
+`gemini-2.5-flash`, `finish_reason=stop`, 1.27s wall / 1226ms billed, usage
+row `265 in / 6 out / $0.0000945` on `/v1internal:streamGenerateContent`.
+
+Faster option (one-line change, not applied): point the alias at
+`gemini-2.5-flash-lite` ($0.10/$0.40 card, distilled for latency) in
+`constants.go` plus its billing card. Tradeoff is slightly lower accuracy
+on noisy audio; A/B against `test.m4a` first. Do NOT point it at
+`gemini-2.5-flash-native-audio-*`: those are AI-Studio-only and the Sep-03
+Antigravity probe did not advertise them, so they would 404 on this path.

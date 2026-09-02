@@ -72,6 +72,8 @@ const antigravityModels = [
   'gemini-2.5-flash-lite',
   'gemini-2.5-flash-thinking',
   'gemini-2.5-pro',
+  // JoyVoice custom alias (Antigravity -> gemini-2.5-flash fast audio path)
+  'joyvoice-fast-audio',
   // Gemini 3 系列
   'gemini-3-flash',
   'gemini-3-pro-high',

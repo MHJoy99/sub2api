@@ -668,6 +668,7 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 				"gemini-3.5-flash-extra-low",
 				"gemini-3.5-flash-low",
 			})
+			applyAntigravityJoyVoiceAlias(result)
 			applyAntigravityGemini31ProAliases(result)
 		}
 		return result
@@ -736,6 +737,25 @@ func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []st
 	for _, model := range models {
 		ensureAntigravityDefaultPassthrough(mapping, model)
 	}
+}
+
+// applyAntigravityJoyVoiceAlias exposes the Sub2API-only JoyVoice alias on
+// accounts with custom mappings. Unlike the passthrough models above, the
+// alias rewrites to gemini-2.5-flash, so an identity entry would route to a
+// nonexistent upstream model.
+func applyAntigravityJoyVoiceAlias(mapping map[string]string) {
+	if mapping == nil {
+		return
+	}
+	if _, exists := mapping["joyvoice-fast-audio"]; exists {
+		return
+	}
+	for pattern := range mapping {
+		if matchWildcard(pattern, "joyvoice-fast-audio") {
+			return
+		}
+	}
+	mapping["joyvoice-fast-audio"] = domain.DefaultAntigravityModelMapping["joyvoice-fast-audio"]
 }
 
 func applyAntigravityGemini31ProAliases(mapping map[string]string) {
