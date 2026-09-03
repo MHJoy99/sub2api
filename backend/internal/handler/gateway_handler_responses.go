@@ -225,6 +225,13 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gateway.responses.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				if isWaitQueueFullError(err) && fs.RecordSlotBusy(account.ID) == FailoverContinue {
+					reqLog.Info("gateway.responses.account_slot_busy_spillover",
+						zap.Int64("account_id", account.ID),
+						zap.Int("spills", fs.SlotBusySpills()),
+					)
+					continue
+				}
 				h.handleConcurrencyError(c, err, "account", streamStarted)
 				return
 			}

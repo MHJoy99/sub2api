@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -139,6 +140,8 @@ type FailoverState struct {
 	profitVetoedAccountIDs map[int64]struct{}
 	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
 	profitVetoCount int
+	// slotBusyCount 本次请求累计的并发队列满溢出次数，用于 MaxSwitches 上限。
+	slotBusyCount int
 }
 
 // NewFailoverState 创建 failover 状态
@@ -173,6 +176,31 @@ func (s *FailoverState) RecordProfitVeto(accountID int64) FailoverAction {
 
 // ProfitVetoCount 返回本次请求累计的利润否决次数（供日志使用）。
 func (s *FailoverState) ProfitVetoCount() int { return s.profitVetoCount }
+
+// RecordSlotBusy 记录一次账号并发等待队列满：把账号加入排除列表并要求调用方
+// 重选下一个账号。每次溢出至少排除一个账号；超过 MaxSwitches 后调用方必须
+// 按原错误终止，因此不会活锁。仅用于队列满（WaitQueueFullError），等待超时
+// 与取消保持原有行为。
+//
+// 返回 FailoverContinue 表示调用方应该 continue 重选；返回 FailoverExhausted
+// 表示调用方应按原错误响应，不得继续 continue。
+func (s *FailoverState) RecordSlotBusy(accountID int64) FailoverAction {
+	s.FailedAccountIDs[accountID] = struct{}{}
+	s.slotBusyCount++
+	if s.slotBusyCount > s.MaxSwitches {
+		return FailoverExhausted
+	}
+	return FailoverContinue
+}
+
+// SlotBusySpills 返回本次请求累计的队列满溢出次数（供日志使用）。
+func (s *FailoverState) SlotBusySpills() int { return s.slotBusyCount }
+
+// isWaitQueueFullError 报告 err 是否为并发等待队列满拒绝（区别于等待超时或取消）。
+func isWaitQueueFullError(err error) bool {
+	var queueFullErr *WaitQueueFullError
+	return errors.As(err, &queueFullErr)
+}
 
 // allExclusionsAreProfitVetoed 判断排除列表是否已全部由利润门否决贡献。
 // 此时清空 FailedAccountIDs 会被原样恢复，退避重试不会带来任何新候选。
