@@ -221,6 +221,10 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 账号级请求头覆写：放在所有内置默认头（含 Grok CLI 身份头）之后应用，
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	// OpenCode Go 会话路由头：调用方值优先于账号固定覆写（上游 #6581），
+	// 缺失时按会话合成稳定 ID（本地扩展）。
+	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header)
+	synthesizeOpenCodeSessionHeader(c, body, account, targetURL, upstreamReq.Header)
 
 	proxyURL := ""
 	if account.Proxy != nil {

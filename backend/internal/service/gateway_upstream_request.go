@@ -188,6 +188,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。
 	account.ApplyHeaderOverrides(req.Header)
+	// OpenCode Go 原生 messages 端点（/zen/go/v1）：调用方值优先，缺失合成。
+	// 作用域限定官方 origin，非 Go 上游 no-op。
+	applyOpenCodeSessionHeader(c, account, targetURL, req.Header)
+	synthesizeOpenCodeSessionHeader(c, body, account, targetURL, req.Header)
 
 	// === DEBUG: 打印上游转发请求（headers + body 摘要），与 CLIENT_ORIGINAL 对比 ===
 	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD", req.Header, body, map[string]string{
