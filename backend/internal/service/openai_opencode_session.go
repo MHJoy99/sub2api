@@ -52,6 +52,26 @@ func isOpenCodeOfficialTarget(targetURL string) bool {
 	return strings.EqualFold(parsed.Scheme, "https") && strings.EqualFold(parsed.Hostname(), "opencode.ai")
 }
 
+// ensureOpenCodeSessionForAccountTest stamps X-OpenCode-Session on direct
+// admin account-test requests (POST /admin/accounts/:id/test). Those probes
+// bypass the gateway builders (buildUpstreamRequest / passthrough / CC /
+// Anthropic) so apply+synthesize never run — without this the Test modal
+// always 400s with MissingSessionID on OpenCode Go even when live gateway
+// traffic is healthy. Scoped to apikey-only + official origin like the
+// gateway path; keeps an admin-configured override, else random UUID.
+func ensureOpenCodeSessionForAccountTest(headers http.Header, account *Account, targetURL string) {
+	if headers == nil || account == nil || account.Type != AccountTypeAPIKey {
+		return
+	}
+	if !isOpenCodeOfficialTarget(targetURL) {
+		return
+	}
+	if strings.TrimSpace(headers.Get(openCodeSessionHeader)) != "" {
+		return
+	}
+	headers.Set(openCodeSessionHeader, generateSessionUUID(""))
+}
+
 // synthesizeOpenCodeSessionHeader injects a stable per-conversation ID when the
 // caller omitted one (e.g. Kilo Code VS Code extension, generic OpenAI
 // clients). Local extension beyond upstream #6581, which deliberately leaves

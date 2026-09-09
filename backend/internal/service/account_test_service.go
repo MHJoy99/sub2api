@@ -791,6 +791,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
+	// OpenCode Go 直连探测：网关外发 synthesis 不经过此处，缺头必 400 MissingSessionID
+	ensureOpenCodeSessionForAccountTest(req.Header, credentialAccount, apiURL)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -1996,6 +1998,8 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	// OpenCode Go 直连探测兜底：缺 X-OpenCode-Session 必 400，先占位再真正探测
+	ensureOpenCodeSessionForAccountTest(req.Header, account, apiURL)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -2129,6 +2133,8 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	// OpenCode Go compact 探测同样需要 X-OpenCode-Session（official origin 限定）
+	ensureOpenCodeSessionForAccountTest(req.Header, account, apiURL)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

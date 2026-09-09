@@ -207,6 +207,33 @@ global-allowlisted (reverted): stable IDs stay off unrelated upstreams.
 Tests: `openai_opencode_session_synthesis_test.go` (distinct `synth*` names
 to avoid colliding with upstream's test file on future pulls).
 
+## 2026-09-09 — Test modal still 400s: direct probe bypassed gateway fix (fixed, needs deploy)
+
+Screenshot: Admin `Test model` (`Default request`) on OpenCode Go apikey
+account → `API returned 400: {"type":"MissingSessionID","message":"Error from
+provider (Console Go): Request is missing x-opencode-session ..."}` with
+`Using model: muse-spark-1.3-contributor`.
+
+Root: `POST /admin/accounts/:id/test` (`AccountTestService.TestAccountConnection`
+`backend/internal/service/account_test_service.go:274`) builds direct upstream
+HTTP (`testOpenAIAccountConnection:647`, `testOpenAIChatCompletionsConnection:1965`,
+`testOpenAICompactConnection:2030`) — it never calls the gateway builders where
+`dce574fff` wired `apply/synthesizeOpenCodeSessionHeader`. So live `/v1/responses`
+traffic was fixed, but the modal always sent no `X-OpenCode-Session` → upstream 400.
+No revert; `git log` shows `dce574fff` + `667c035bd` intact.
+
+Fix (`go vet ./internal/service` clean, `gofmt` clean; full service
+test binary still OOMs on 7.8GB box as before — CI must run it):
+
+* `backend/internal/service/openai_opencode_session.go:55-73`
+  `ensureOpenCodeSessionForAccountTest(headers, account, targetURL)` — apikey-only,
+  exact `https://opencode.ai` origin only, keeps admin override, else random UUID.
+* Wired AFTER `ApplyHeaderOverrides` in all three apikey probe paths:
+  `backend/internal/service/account_test_service.go:792-796` (Responses),
+  `:1997-2001` (Chat Completions), `:2134-2137` (Compact).
+* Verify after deploy: open account → Test model → Default request →
+  expect 200 stream, not `MissingSessionID`. Real gateway traffic unchanged.
+
 ## Rollback
 
 ```sql
