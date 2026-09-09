@@ -54,3 +54,13 @@ Needed when you want zero-touch for empty-mapping accounts + picker + pricing. E
 ## Re-verified 2026-09-04
 
 3 parallel read-only sub-agents checked every file:line above. All MATCH except fixed: `GetModelPricing 957` (not 956), `parsePricingData 423` (not 422), `concrete list 195-203`, `ModelsListCache 1090`, `o1,o3-o5` (no o2), GLM generic fallback nuance, antigravity-vs-claude fallback nuance. Deploy script `deploy/deploy-sub2api.sh:20,122-126,154,159-163` verified DRY_RUN + no-volume-remove.
+
+## 2026-09-09 — pinned upstream model rot: OAuth image main model (fixed, needs deploy)
+
+Symptom: `POST /v1/images/generations {"model":"gpt-image-2"}` → `503 No available compatible accounts` on group 7 despite healthy accounts. Live logs (`docker logs sub2api`) showed the real chain: OAuth account 5 selected → upstream 400 `The 'gpt-5.4-mini' model is not supported when using Codex with a ChatGPT account` (`openai_images_responses.go:925`) → failover → pool exhausted → 503 (`handler/openai_images.go:186`).
+
+Root: `openAIImagesResponsesMainModel = "gpt-5.4-mini"` (`backend/internal/service/openai_images.go:42`, since `eea6f3888` Apr 2026) pins the reasoning `model` wrapping the `image_generation` tool on the ChatGPT Codex backend (`openai_images_responses.go:385`, `openai_codex_transform.go:1212-1215`). Upstream dropped mini support for Codex+ChatGPT accounts.
+
+Fix: `gpt-5.4-mini` → `gpt-5.6-luna`. Evidence: `usage_logs` account 5 last 7d served `gpt-5.6-luna` 581× (latest today), `terra` 64×, `5.5` 24×, zero `5.4-mini`; luna input/output pricing also cheaper (`model_prices_and_context_window.json`). Tests referencing the constant use the symbol; hardcoded `gpt-5.4-mini` in tests are normalize-table/SSE-fixture/catalog cases, unaffected. `gofmt` + `go vet ./internal/service` clean.
+
+Lesson: hardcoded upstream model IDs rot — when an entire endpoint family 503s with healthy accounts, check `docker logs` for the first upstream 400 before touching pool capacity. Verify after deploy: same curl → 200 + image bytes; `usage_logs` row with `account_id=5`, nonzero cost.
