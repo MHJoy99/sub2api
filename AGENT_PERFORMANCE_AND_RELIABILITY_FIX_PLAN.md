@@ -261,3 +261,13 @@ Each `Fixes #…` auto-links into the issue threads, so reporters find
 the branches with no maintainer action needed.
 
 MD docs updated — stale MDs deleted, new MDs created where missing.
+
+## 9. CLA Signing (2026-09-13)
+
+CLA Assistant Lite required a signature comment, but it only accepts it
+from a PR *committer*: our branches were authored as mhjhub while the
+available token is MHJoy99, so all checks failed. Fixed by amending all
+10 branch commits to MHJoy99 authorship, force-pushing, reposting the
+signature comment, and rechecking. All 10 PRs now pass cla-check.
+
+MD docs updated — stale MDs deleted, new MDs created where missing.
