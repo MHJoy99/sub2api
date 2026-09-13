@@ -335,10 +335,10 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 		wantDrop  bool
 	}{
 		{
-			name:      "mixed server and client tools on gemini 3 keeps flag",
-			model:     "gemini-3.8-flash-tiered",
-			tools:     `[{"name":"get_weather","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]`,
-			wantField: true,
+			name:     "mixed server and client tools drop search",
+			model:    "gemini-3.8-flash-tiered",
+			tools:    `[{"name":"get_weather","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]`,
+			wantDrop: true,
 		},
 		{
 			name:     "mixed tools on older models drop search",
@@ -446,11 +446,10 @@ func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *te
 		return upstream.requestBodies[0]
 	}
 
-	t.Run("gemini 3 keeps search with flag", func(t *testing.T) {
+	t.Run("gemini 3 drops search keeps functions", func(t *testing.T) {
 		requestBody := forward("gemini-3.8-flash-tiered")
-		require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
 		require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
-		require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
+		require.False(t, strings.Contains(gjson.GetBytes(requestBody, "request.tools").String(), "googleSearch"))
 	})
 
 	t.Run("older models drop search keeps functions", func(t *testing.T) {

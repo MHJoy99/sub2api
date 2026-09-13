@@ -52,41 +52,27 @@ func TestBuildGenerationConfig_Gemini3ThinkingLevel(t *testing.T) {
 	})
 }
 
-// #7080: Gemini 3+ mixed search+functions keeps both tool types with the
-// toolConfig flag; on older models the search builtin is dropped and
-// function declarations preserved (upstream rejects the mix otherwise).
+// #7080: Antigravity v1internal rejects search+function mixing on every
+// tested model, so the search builtin is dropped and function declarations
+// preserved (LiteLLM degrades the same way to avoid the 400).
 func TestBuildToolsForModel_MixedSearchRouting(t *testing.T) {
 	mixed := []ClaudeTool{
 		{Name: "bash", InputSchema: map[string]any{"type": "object"}},
 		{Type: "web_search_20250305", Name: "web_search"},
 	}
 
-	t.Run("gemini 3 keeps search with flag", func(t *testing.T) {
-		decls := buildToolsForModel(mixed, "gemini-3.8-flash-tiered")
-		require.Len(t, decls, 2)
-		require.NotEmpty(t, decls[0].FunctionDeclarations)
-		require.NotNil(t, decls[1].GoogleSearch)
-		require.True(t, hasMixedToolInvocations(decls))
-	})
-
-	t.Run("older model drops search keeps functions", func(t *testing.T) {
-		decls := buildToolsForModel(mixed, "gemini-2.5-flash")
+	t.Run("mixed drops search keeps functions", func(t *testing.T) {
+		decls := buildTools(mixed)
 		require.Len(t, decls, 1)
 		require.NotEmpty(t, decls[0].FunctionDeclarations)
 		require.Nil(t, decls[0].GoogleSearch)
 		require.False(t, hasMixedToolInvocations(decls))
 	})
 
-	t.Run("claude model drops search keeps functions", func(t *testing.T) {
-		decls := buildToolsForModel(mixed, "claude-sonnet-4-6")
-		require.Len(t, decls, 1)
-		require.NotEmpty(t, decls[0].FunctionDeclarations)
-	})
-
 	t.Run("pure search keeps fallback entry", func(t *testing.T) {
-		decls := buildToolsForModel([]ClaudeTool{
+		decls := buildTools([]ClaudeTool{
 			{Type: "web_search_20250305", Name: "web_search"},
-		}, "gemini-2.5-flash")
+		})
 		require.Len(t, decls, 1)
 		require.NotNil(t, decls[0].GoogleSearch)
 	})
@@ -99,7 +85,7 @@ func TestBuildToolsForModel_MixedSearchRouting(t *testing.T) {
 	})
 }
 
-func TestEnsureToolConfigSnakeCaseEnvelope(t *testing.T) {
+func TestTransform_MixedSearchDroppedBeforeFlag(t *testing.T) {
 	mixed := []ClaudeTool{
 		{Name: "bash", InputSchema: map[string]any{"type": "object"}},
 		{Type: "web_search_20250305", Name: "web_search"},
@@ -111,27 +97,17 @@ func TestEnsureToolConfigSnakeCaseEnvelope(t *testing.T) {
 	}, "project-1", "gemini-3.8-flash-tiered", DefaultTransformOptions())
 	require.NoError(t, err)
 
+	// Mixed search is dropped before the flag stage, so the envelope must
+	// carry function declarations with no googleSearch and no flag.
 	var env map[string]any
 	require.NoError(t, json.Unmarshal(body, &env))
 	req, ok := env["request"].(map[string]any)
 	require.True(t, ok)
-	toolCfg, ok := req["toolConfig"].(map[string]any)
-	require.True(t, ok, "camelCase toolConfig must exist")
-	require.Equal(t, true, toolCfg["includeServerSideToolInvocations"])
-	require.Equal(t, true, toolCfg["include_server_side_tool_invocations"])
-	snake, ok := req["tool_config"].(map[string]any)
-	require.True(t, ok, "snake_case tool_config envelope must exist")
-	require.Equal(t, true, snake["include_server_side_tool_invocations"])
-}
-
-func TestEnsureToolConfigSnakeCaseEnvelope_EdgeCases(t *testing.T) {
-	t.Run("no tools leaves envelope untouched", func(t *testing.T) {
-		out := ensureToolConfigSnakeCaseEnvelope([]byte(`{"request":{"contents":[]}}`))
-		require.NotContains(t, string(out), "tool_config")
-	})
-
-	t.Run("invalid json passes through", func(t *testing.T) {
-		raw := []byte(`not-json`)
-		require.Equal(t, raw, ensureToolConfigSnakeCaseEnvelope(raw))
-	})
+	tools, ok := req["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 1)
+	first, _ := tools[0].(map[string]any)
+	require.Contains(t, first, "functionDeclarations")
+	require.NotContains(t, first, "googleSearch")
+	require.NotContains(t, string(body), "includeServerSideToolInvocations")
 }

@@ -609,7 +609,7 @@ func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
 		return req, string(body)
 	}
 
-	t.Run("mixed builtin and function tools enable server-side tool invocations", func(t *testing.T) {
+	t.Run("mixed builtin and function tools drop search keeps functions", func(t *testing.T) {
 		body, err := TransformClaudeToGeminiWithOptions(&ClaudeRequest{
 			Model: "gemini-3.8-flash-tiered",
 			Messages: []ClaudeMessage{
@@ -624,10 +624,10 @@ func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
 
 		var req3 V1InternalRequest
 		require.NoError(t, json.Unmarshal(body, &req3))
-		require.NotNil(t, req3.Request.ToolConfig)
-		require.NotNil(t, req3.Request.ToolConfig.IncludeServerSideToolInvocations)
-		require.True(t, *req3.Request.ToolConfig.IncludeServerSideToolInvocations)
-		require.Contains(t, string(body), `"includeServerSideToolInvocations":true`)
+		require.Len(t, req3.Request.Tools, 1)
+		require.NotEmpty(t, req3.Request.Tools[0].FunctionDeclarations)
+		require.Nil(t, req3.Request.Tools[0].GoogleSearch)
+		require.NotContains(t, string(body), `"includeServerSideToolInvocations":true`)
 	})
 
 	t.Run("mixed tools on older models drop search instead of flagging", func(t *testing.T) {

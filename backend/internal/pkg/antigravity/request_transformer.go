@@ -144,7 +144,7 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	generationConfig := buildGenerationConfig(reqForConfig)
 
 	// 4. 构建 tools
-	tools := buildToolsForModel(claudeReq.Tools, targetModel)
+	tools := buildTools(claudeReq.Tools)
 
 	// 5. 构建内部请求
 	innerRequest := GeminiRequest{
@@ -201,36 +201,7 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	if err != nil {
 		return nil, err
 	}
-	// #7080: Claude models via Antigravity reject camelCase-only
-	// toolConfig envelope. Duplicate request.toolConfig as
-	// request.tool_config so both protobuf JSON parsers accept the
-	// include_server_side_tool_invocations flag.
-	return ensureToolConfigSnakeCaseEnvelope(raw), nil
-}
-
-// ensureToolConfigSnakeCaseEnvelope duplicates request.toolConfig as
-// request.tool_config in raw v1internal JSON. No-op when toolConfig absent.
-func ensureToolConfigSnakeCaseEnvelope(raw []byte) []byte {
-	var env map[string]any
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return raw
-	}
-	req, _ := env["request"].(map[string]any)
-	if req == nil {
-		return raw
-	}
-	toolCfg, _ := req["toolConfig"].(map[string]any)
-	if toolCfg == nil {
-		return raw
-	}
-	if _, exists := req["tool_config"]; !exists {
-		req["tool_config"] = toolCfg
-	}
-	out, err := json.Marshal(env)
-	if err != nil {
-		return raw
-	}
-	return out
+	return raw, nil
 }
 
 // antigravityIdentity Antigravity identity 提示词
@@ -807,9 +778,10 @@ func hasMixedToolInvocations(declarations []GeminiToolDeclaration) bool {
 	return hasFunc && hasBuiltin
 }
 
-// IsGemini3OrNewer reports whether a model supports native mixing of
-// built-in search tools with function calling (#7080). Mirrors LiteLLM's
-// VertexGeminiConfig._is_gemini_3_or_newer.
+// IsGemini3OrNewer reports whether a model is Gemini 3 or newer.
+// Kept for future use; note that Antigravity v1internal currently rejects
+// search+function mixing on every tested model (2.5-flash, 3.6-high,
+// 3.8-tiered), so buildToolsForModel drops search on mixed for all models.
 func IsGemini3OrNewer(model string) bool {
 	lower := strings.ToLower(model)
 	return strings.Contains(lower, "gemini-3") || strings.Contains(lower, "gemini-4")
@@ -835,14 +807,10 @@ func hasFunctionToolsForSearchRouting(tools []ClaudeTool) bool {
 	return false
 }
 
-// buildTools 构建 tools
+// buildTools 构建 tools。Mixed search+functions 下 search builtin 会被丢弃，
+// 仅保留 function declarations（见 #7080：Antigravity v1internal 在所有实测
+// 模型上拒绝混用，LiteLLM 亦采用相同降级策略避免 400）。
 func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
-	return buildToolsForModel(tools, "")
-}
-
-// buildToolsForModel 构建 tools；targetModel 决定 mixed search+functions
-// 在非 Gemini 3+ 模型上是否保留 search（见 #7080）。
-func buildToolsForModel(tools []ClaudeTool, targetModel string) []GeminiToolDeclaration {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -912,11 +880,11 @@ func buildToolsForModel(tools []ClaudeTool, targetModel string) []GeminiToolDecl
 			FunctionDeclarations: funcDecls,
 		})
 	}
-	// #7080: upstream only supports search+function mixing natively on
-	// Gemini 3+ (with the toolConfig flag). On older models the mix is
-	// rejected even with the flag, so drop the search builtin and keep
-	// function declarations (LiteLLM does the same to avoid the 400).
-	if hasWebSearch && (len(funcDecls) == 0 || IsGemini3OrNewer(targetModel)) {
+	// #7080: Antigravity v1internal rejects search+function mixing on every
+	// tested model (2.5-flash, 3.6-high, 3.8-tiered) even with the
+	// toolConfig flag, so drop the search builtin and keep function
+	// declarations (LiteLLM degrades the same way to avoid the 400).
+	if hasWebSearch && len(funcDecls) == 0 {
 		declarations = append(declarations, GeminiToolDeclaration{
 			GoogleSearch: &GeminiGoogleSearch{
 				EnhancedContent: &GeminiEnhancedContent{
@@ -927,7 +895,7 @@ func buildToolsForModel(tools []ClaudeTool, targetModel string) []GeminiToolDecl
 			},
 		})
 	} else if hasWebSearch {
-		log.Printf("[Antigravity] dropping googleSearch for non-Gemini-3 model %s: search+function mixing unsupported upstream, keeping %d function declarations", targetModel, len(funcDecls))
+		log.Printf("[Antigravity] dropping googleSearch: search+function mixing unsupported upstream, keeping %d function declarations", len(funcDecls))
 	}
 	if hasCodeExecution {
 		declarations = append(declarations, GeminiToolDeclaration{

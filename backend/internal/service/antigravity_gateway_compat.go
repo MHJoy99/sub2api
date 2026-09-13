@@ -482,9 +482,10 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 }
 
 // enableMixedGeminiToolInvocationsForModel sets the mixed-invocation flag
-// when built-in search coexists with function declarations. On non-Gemini-3
-// models upstream rejects the mix even with the flag (#7080), so the search
-// builtin entries are dropped and function declarations preserved.
+// when built-in search coexists with function declarations. Antigravity
+// v1internal rejects the mix on every tested model even with the flag
+// (#7080), so the search builtin entries are dropped and function
+// declarations preserved (mappedModel kept for future use).
 func enableMixedGeminiToolInvocationsForModel(body []byte, mappedModel string) ([]byte, error) {
 	var request map[string]any
 	if err := json.Unmarshal(body, &request); err != nil {
@@ -508,7 +509,7 @@ func enableMixedGeminiToolInvocationsForModel(body []byte, mappedModel string) (
 		return body, nil
 	}
 
-	if mappedModel != "" && !antigravity.IsGemini3OrNewer(mappedModel) {
+	{
 		kept := make([]any, 0, 2)
 		if tools, ok := request["tools"].([]any); ok {
 			for _, rawTool := range tools {
@@ -530,18 +531,6 @@ func enableMixedGeminiToolInvocationsForModel(body []byte, mappedModel string) (
 		}
 		return out, nil
 	}
-
-	toolConfig, _ := request["toolConfig"].(map[string]any)
-	if toolConfig == nil {
-		toolConfig = make(map[string]any)
-		request["toolConfig"] = toolConfig
-	}
-	toolConfig["includeServerSideToolInvocations"] = true
-	// #7080: also emit snake_case for Claude-model upstreams that parse
-	// the Anthropic envelope, and duplicate the envelope itself.
-	toolConfig["include_server_side_tool_invocations"] = true
-	request["tool_config"] = toolConfig
-	return json.Marshal(request)
 }
 
 func antigravityCompatProxyURL(account *Account) string {
