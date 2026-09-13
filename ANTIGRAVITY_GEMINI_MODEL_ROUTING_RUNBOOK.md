@@ -350,3 +350,31 @@ Post-deploy verification, all PASS:
   notes; routing and billing were correct in that call too).
 - Unit tests: `internal/pkg/antigravity` + `internal/domain` ok; targeted
   service tests (78 subtests incl. all new mapping/pricing cases) PASS.
+
+## 2026-09-13 — upstream merge: full Gemini 3.7/3.8 flash families
+
+Merged `origin/main` (404 commits, `c6e6208a7`) into `ours`. Upstream had
+independently added the complete 3.7 and 3.8 thinking-tier families, so this
+supersedes the "bare `3.8-flash` absent" note above — both bare IDs now exist
+with billing cards and `Contains` rules:
+
+- `domain/constants.go` + `pkg/antigravity/claude_types.go`: `gemini-3.7-flash`
+  and `gemini-3.8-flash` each with `-high/-low/-medium/-tiered` variants.
+- `service/billing_service.go:494-517,1150-1155`: fallback price cards
+  ($0.75/$3.75/$0.075 per MTok) + billable `Contains` rules for both bases.
+- `resources/model-pricing/model_prices_and_context_window.json`: upstream
+  litellm mirror (covers 2.5-flash/3.5-flash/3-pro-preview, so older local
+  fallback cards are dormant but harmless).
+- `frontend/src/composables/useModelWhitelist.ts`: picker gained the 8
+  base/high/low/medium IDs (previously only `-tiered`).
+
+Preserved our deltas: Sep-03 probe batch (`3-flash-agent`, `3.1-flash-lite`,
+`3.5` extra-low/low/lite), JoyVoice alias + billing, `gemini-pro-agent` /
+`gpt-oss` / `tab_flash` / longcat / hy3 billing, `synthesizeOpenCodeSessionHeader`
+fallback (re-based onto upstream's #6581 session plumbing). Our three
+`ensureOpenCodeSessionForAccountTest` call sites converted to upstream
+`applyOpenCodeSessionHeader(c, acct, url, headers, payloadBytes)`.
+
+Verified in trial worktree: `go build ./...` clean, `service` (27 PASS),
+`antigravity` + `domain` + `handler` suites green. Pushed `mhjoy/ours`,
+deployed, `/v1/models` re-checked post-deploy.

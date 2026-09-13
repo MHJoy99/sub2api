@@ -64,3 +64,29 @@ Root: `openAIImagesResponsesMainModel = "gpt-5.4-mini"` (`backend/internal/servi
 Fix: `gpt-5.4-mini` → `gpt-5.6-luna`. Evidence: `usage_logs` account 5 last 7d served `gpt-5.6-luna` 581× (latest today), `terra` 64×, `5.5` 24×, zero `5.4-mini`; luna input/output pricing also cheaper (`model_prices_and_context_window.json`). Tests referencing the constant use the symbol; hardcoded `gpt-5.4-mini` in tests are normalize-table/SSE-fixture/catalog cases, unaffected. `gofmt` + `go vet ./internal/service` clean.
 
 Lesson: hardcoded upstream model IDs rot — when an entire endpoint family 503s with healthy accounts, check `docker logs` for the first upstream 400 before touching pool capacity. Verify after deploy: same curl → 200 + image bytes; `usage_logs` row with `account_id=5`, nonzero cost.
+
+## 2026-09-13 — upstream merge pattern (origin/main 404 commits → ours)
+
+Trial-merge in a scratch worktree so the live tree stays servable:
+`git worktree add /tmp/upstream-trial origin/main`, then
+`git merge --no-commit ours`. Resolve per-file: take upstream for families it
+added independently (3.7/3.8, GPT-6/Astra, muse-spark, #6581 session
+plumbing, queue-full codes), keep our probe batch / JoyVoice / billing cards /
+`synthesizeOpenCodeSessionHeader` fallback (re-based onto the new upstream
+helper signatures). Additive test blocks: keep both. Comment-only hunks: keep
+both. JSON catalog conflicts: keep both entry blocks, fix the joining comma,
+validate with `python3 -c "import json;json.load(...)"`.
+
+Gotchas hit this round: old-signature callers still compile against widened
+variadic helpers but silently lose the new behavior (audit every caller, e.g.
+`gateway_upstream_request.go`); deleted local helpers break auto-merged call
+sites elsewhere (`ensureOpenCodeSessionForAccountTest` at
+`account_test_service.go:904,2245` — build catches them); `gofmt -w` after
+python stitching (indentation); frontend picker lists lag backend mappings
+(`useModelWhitelist.ts` needed the 8 base/high/low/medium IDs by hand).
+
+Verify: `gofmt -l`, `go build ./...`, targeted `go test` (service pricing +
+session, antigravity, domain, handler), commit merge in trial worktree,
+`git merge --ff-only <sha>` in live tree, push fork, dry-run + real deploy,
+`GET /v1/models` + live request check. MD docs updated — stale MDs deleted,
+new MDs created where missing.
