@@ -173,3 +173,14 @@ deploy/artifacts/
 deploy/owner-api-keys.json
 deploy/sub2api-*.sql
 .zcode/
+
+# 本地根目录杂项（保持工作区干净，仅本机保留）
+/.kilo/
+/sub2api.code-workspace
+/CODEX_PICKER_MODEL_ONBOARDING_RUNBOOK.md
+/KILO_CODE_BDX_MODEL_ONBOARDING_RUNBOOK.md
+/ORCHESTRATION_PHASE_2_DESIGN.md
+/RELIABILITY_FAILOVER_INVESTIGATION_RUNBOOK.md
+/STREAMING_INVESTIGATION_RUNBOOK.md
+/TOOL_CALLING_INVESTIGATION_RUNBOOK.md
+/deploy/add-nvidia-account.sh
