@@ -190,6 +190,8 @@ var geminiModels = []modelDef{
 	{ID: "gemini-3.1-flash-lite", DisplayName: "Gemini 3.1 Flash Lite", CreatedAt: "2026-09-03T00:00:00Z"},
 	{ID: "gemini-3.5-flash-extra-low", DisplayName: "Gemini 3.5 Flash (Low)", CreatedAt: "2026-09-03T00:00:00Z", IsReasoning: true},
 	{ID: "gemini-3.5-flash-low", DisplayName: "Gemini 3.5 Flash (Medium)", CreatedAt: "2026-09-03T00:00:00Z", IsReasoning: true},
+	{ID: "gemini-3.5-flash-lite", DisplayName: "Gemini 3.5 Flash Lite", CreatedAt: "2026-09-13T00:00:00Z"},
+	{ID: "gemini-3.8-flash-tiered", DisplayName: "Gemini 3.8 Flash Tiered", CreatedAt: "2026-09-13T00:00:00Z", IsReasoning: true},
 	{ID: "gemini-3-pro-preview", DisplayName: "Gemini 3 Pro Preview", CreatedAt: "2025-06-01T00:00:00Z", IsReasoning: true},
 	{ID: "gemini-3-pro-image", DisplayName: "Gemini 3 Pro Image", CreatedAt: "2025-06-01T00:00:00Z"},
 }

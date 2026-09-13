@@ -42,7 +42,7 @@ Needed when you want zero-touch for empty-mapping accounts + picker + pricing. E
 
 * New `target_platform` outside 8: migration `CHECK` (`172_composite_model_routes.sql:15-17` + `227:5-8`), `composite_platform.go:195-203`, `group_handler.go:245 oneof` (8, no `composite`).
 * Unknown `gpt-`: `billing_service.go:1214-1237` known-only (`normalizeKnownOpenAICodexModel`) else `nil :1266` → `ErrUnavailable` by design. Unknown GLM: generic `Contains glm-5 :1126` / `glm-4.5 :1153` still catch many; only truly unlisted (e.g. `glm-6`) returns nil (`:1110-1112` whitelist comment). Must add JSON or fallback entry.
-* OpenCode Go segregation: provider-exclusive alias needs exactly one mapping owner + one exact route per composite group (`OPENCODE_GO_SEGREGATION_RUNBOOK.md:1-13`).
+* OpenCode Go segregation: provider-exclusive alias needs exactly one mapping owner + one exact route per composite group (`OPENCODE_GO_SEGREGATION_RUNBOOK.md:1-13`). Since 2026-09-10 the Go fleet is split into responses- and chat-mode account sets — add the alias only to the set matching the upstream endpoint (`OPENCODE_GO_ENDPOINT_SPLIT_RUNBOOK.md`).
 
 ## Verification checklist
 

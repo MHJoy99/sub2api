@@ -280,3 +280,73 @@ peak/off-peak rates, so `billing_fallback_mapping_test.go` DeepSeek rows were
 updated to the off-peak card (flash $0.22/$0.66/$0.007, pro $0.66/$1.98/$0.022
 per MTok). Live-billing notes: DeepSeek now bills 2x in weekday peak windows,
 and long-context tiers are catalog-data-driven instead of hardcoded.
+
+## 19) Upstream re-probe — 2026-09-13: two new models mapped
+
+Read-only `POST /v1internal:fetchAvailableModels` probe (existing access
+token + project ID per account, no token refresh, no generation calls) across
+all 5 active Antigravity OAuth accounts (ids 1, 3, 4, 7, 25; a 6th account,
+id 2, is soft-deleted): HTTP 200 everywhere, identical 27-model union on every
+account (up from 25 on 2026-09-03), 1 deprecated redirect
+(`gemini-3.1-pro-high` -> `gemini-pro-agent`, already handled by
+`applyAntigravityGemini31ProAliases`).
+
+New upstream IDs since the Sep-03 probe (both reported by all 5 accounts):
+
+| Upstream ID | Upstream signal | Action |
+|---|---|---|
+| `gemini-3.5-flash-lite` | Display "Gemini 3.5 Flash Lite", 1M in / 65,535 out, non-thinking | Public exact passthrough, official upstream name |
+| `gemini-3.8-flash-tiered` | No display name, supportsImages + supportsThinking + supportsVideo, recommended, 1M in / 65,536 out (same shape as 3.6/3.7-tiered) | Public exact passthrough, official upstream name, display "Gemini 3.8 Flash Tiered" |
+
+`gemini-3.8-flash` (bare, GA in the public Gemini API) is still absent
+upstream — only the `-tiered` variant is reported. Bare `3.8-flash` stays
+unmapped until an account reports it. Internal IDs `chat_20706`,
+`chat_23310`, `tab_jump_flash_lite_preview` remain record-only, not published.
+
+Source changes (same 4-layer pattern as Sep-03):
+
+- `backend/internal/domain/constants.go` — both IDs added to
+  `DefaultAntigravityModelMapping` as identity passthroughs.
+- `backend/internal/service/account.go` — both IDs added to
+  `ensureAntigravityDefaultPassthroughs`, so the 3 custom-mapped accounts
+  (ids 1, 3, 25) auto-gain them; ids 4 and 7 use the default mapping.
+- `backend/internal/pkg/antigravity/claude_types.go` — both IDs added to
+  `geminiModels` (`3.8-flash-tiered` with `IsReasoning: true` per upstream
+  `supportsThinking`; `3.5-flash-lite` non-reasoning). Drives `/v1/models`
+  and Gemini `v1beta/models`.
+- `frontend/src/composables/useModelWhitelist.ts` — both IDs added to
+  `antigravityModels` (picker convenience only).
+- `backend/internal/service/billing_service.go` — new `gemini-3.8-flash`
+  fallback card ($0.75/$3.75/$0.075 per MTok, priced against the 3.7 tiered
+  predecessor; official 3.8 pricing unpublished) plus a
+  `gemini-3.8-flash` `Contains` rule so token-bearing requests never record
+  $0. `gemini-3.5-flash-lite` needs no new card: the existing
+  `gemini-3.5-flash` `Contains` rule already covers it.
+- Tests: `billing_fallback_mapping_test.go` (+3 rows),
+  `claude_types_test.go` (+2 IDs), `account_wildcard_test.go` (+2
+  passthroughs), `antigravity_model_mapping_test.go` (+2 cases).
+
+No composite-route rows needed: groups 4 and 7 both carry an enabled
+`gemini-` prefix route to `antigravity`, which dispatches the new `gemini-*`
+IDs. No new `target_platform`, no migration.
+
+Deployed 2026-09-13 via `deploy/deploy-sub2api.sh` (dry-run clean, full
+build clean, health check passed, `/app/data` preserved on
+`deploy_sub2api_data`; image `sub2api:deploy-20260913014237-c1bb1dbad`).
+Post-deploy verification, all PASS:
+
+- `GET /v1/models` (120 entries) contains `gemini-3.5-flash-lite` and
+  `gemini-3.8-flash-tiered`, and correctly does NOT advertise bare
+  `gemini-3.8-flash`.
+- Non-stream `POST /v1/chat/completions {"model":"gemini-3.5-flash-lite"}`
+  → 200, content `OK`, `finish_reason=stop`; `usage_logs`:
+  `requested=upstream=gemini-3.5-flash-lite`, cost $0.0000802, account 25.
+- Stream `POST ... {"model":"gemini-3.8-flash-tiered","stream":true}` → 200,
+  chunks + `data: [DONE]`; `usage_logs`: `requested=upstream`,
+  cost $0.00020925. Follow-up non-stream prompt answered
+  `2 + 2 equals 4.`, confirming real generation (one earlier
+  `Say the word OK` probe returned empty text with 60 completion tokens —
+  upstream thinking-model quirk, same class as the Sep-03 `SAFETY`-empty
+  notes; routing and billing were correct in that call too).
+- Unit tests: `internal/pkg/antigravity` + `internal/domain` ok; targeted
+  service tests (78 subtests incl. all new mapping/pricing cases) PASS.

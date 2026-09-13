@@ -429,6 +429,16 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// Gemini 3.8 Flash tiered (reported by Antigravity fetchAvailableModels
+	// 2026-09-13; official 3.8 token pricing unpublished, so it is priced
+	// against the 3.7 tiered predecessor until the catalog carries a 3.8 card).
+	s.fallbackPrices["gemini-3.8-flash"] = &ModelPricing{
+		InputPricePerToken:     0.75e-6,
+		OutputPricePerToken:    3.75e-6,
+		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// Gemini 3 Pro preview family ($2 input / $12 output / $0.20 cached input
 	// per MTok). Covers gemini-3-pro-preview and its -high/-low effort aliases.
 	s.fallbackPrices["gemini-3-pro-preview"] = &ModelPricing{
@@ -891,6 +901,24 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// Meituan LongCat-2.0 via OpenCode Go ($0.30 input / $1.20 output /
+	// $0.006 cached input per MTok). Go-only alias; no LiteLLM catalog key.
+	s.fallbackPrices["longcat-2.0"] = &ModelPricing{
+		InputPricePerToken:     0.3e-6,
+		OutputPricePerToken:    1.2e-6,
+		CacheReadPricePerToken: 0.006e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Tencent Hunyuan Hy3 via OpenCode Go ($0.14 input / $0.58 output /
+	// $0.035 cached input per MTok).
+	s.fallbackPrices["hy3"] = &ModelPricing{
+		InputPricePerToken:     0.14e-6,
+		OutputPricePerToken:    0.58e-6,
+		CacheReadPricePerToken: 0.035e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// OpenAI gpt-oss-120b open model ($0.15 input / $0.60 output per MTok).
 	s.fallbackPrices["gpt-oss-120b"] = &ModelPricing{
 		InputPricePerToken:     0.15e-6,
@@ -1024,6 +1052,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.7-flash") || strings.Contains(modelLower, "gemini-3-7-flash") {
 		return s.fallbackPrices["gemini-3.7-flash"]
 	}
+	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
+		return s.fallbackPrices["gemini-3.8-flash"]
+	}
 	// Antigravity Gemini 3 Pro effort aliases (-high/-low) and the
 	// "gemini-pro-agent" agent mode bill on the Gemini 3 Pro card.
 	if strings.Contains(modelLower, "gemini-3-pro") || modelLower == "gemini-pro-agent" {
@@ -1105,6 +1136,14 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 小米 MiMo（mimo-v2.5 等）。
 	if strings.Contains(modelLower, "mimo") {
 		return s.fallbackPrices["mimo-v2.5"]
+	}
+	// 美团 LongCat-2.0（go-longcat-2.0 等）。
+	if strings.HasPrefix(modelLower, "longcat") {
+		return s.fallbackPrices["longcat-2.0"]
+	}
+	// 腾讯混元 Hy3（go-hy3 等）；hy4-preview 不在本价卡范围，继续走白名单失败。
+	if modelLower == "hy3" || strings.HasPrefix(modelLower, "hy3-") {
+		return s.fallbackPrices["hy3"]
 	}
 
 	// ---- 国产 LLM 兜底匹配 ----

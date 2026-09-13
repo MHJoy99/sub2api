@@ -558,3 +558,38 @@ Deployment verification for this change:
   `go-muse-spark-1.3-contributor`, content `OK`, and `finish_reason=stop`.
 - Gateway streaming verification returned content `OK`, `finish_reason=stop`,
   and the terminal `data: [DONE]` marker.
+
+## 2026-09-10 — OpenCode Go endpoint split: clean aliases + missing cards
+
+- The Go fleet split into responses-mode (24/26/27) and chat-mode
+  (28/29/30) account sets; clean bare-id aliases (`glm-5.3`, `kimi-k3`,
+  `deepseek-v4.1-flash`, …) were added next to the legacy `go-*` keys.
+  Pricing resolves by the same paths as `go-*` (bare names hit the
+  family/exact fallback rules directly; `go-*` strips the prefix first via
+  `stripCompositeBillingPrefix`). No per-alias cards are required.
+- Added exact fallback cards for two Go-only models that previously logged
+  `openai_usage.pricing_missing_record_zero_cost` and billed $0:
+  `longcat-2.0` $0.30/$1.20, cache-read $0.006; `hy3` $0.14/$0.58,
+  cache-read $0.035 per MTok
+  (`backend/internal/service/billing_service.go` cards, rules, tests in
+  `billing_fallback_mapping_test.go`). `gofmt` clean; targeted
+  `TestFallbackPricingCoversCompositeAndUnmappedAliases` PASS.
+- ~~Deploy pending~~ DEPLOYED 2026-09-13 (`sub2api:deploy-20260913014237`)
+  along with the Antigravity 3.8-tiered/3.5-lite work below — `hy3` /
+  `longcat-2.0` now bill correctly. `minimax-m2.7` is mapped but upstream
+  currently 5xx in both formats. Full topology, endpoint classification,
+  verification evidence, and cooldown gotchas:
+  `OPENCODE_GO_ENDPOINT_SPLIT_RUNBOOK.md`.
+
+## 2026-09-13 — Antigravity: gemini-3.8-flash-tiered + gemini-3.5-flash-lite
+
+- New `gemini-3.8-flash` fallback card ($0.75/$3.75/$0.075 per MTok, priced
+  against the 3.7 tiered predecessor; official 3.8 pricing unpublished) plus
+  a `gemini-3.8-flash` `Contains` rule, so the new `-tiered` alias never
+  records $0. `gemini-3.5-flash-lite` needs no card: the existing
+  `gemini-3.5-flash` `Contains` rule ($1.50/$9.00/$0.15) already covers it.
+- Live-verified post-deploy: `gemini-3.5-flash-lite` usage row $0.0000802,
+  `gemini-3.8-flash-tiered` usage row $0.00020925, both with
+  `requested == upstream`. Bare `gemini-3.8-flash` stays unmapped (not
+  reported upstream). Details: `ANTIGRAVITY_GEMINI_MODEL_ROUTING_RUNBOOK.md`
+  section 19.

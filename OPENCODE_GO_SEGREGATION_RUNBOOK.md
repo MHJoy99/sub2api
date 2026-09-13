@@ -1,5 +1,14 @@
 # OpenCode Go / ChatGPT provider segregation
 
+> 2026-09-10 topology update: the Go fleet is split by upstream endpoint
+> format — 24/26/27 = `OpenCode Go Responses 1-3` (`force_responses`),
+> 28/29/30 = `OpenCode Go Chat 1-3` (`force_chat_completions`), each with a
+> protocol-exclusive mapping plus clean bare-id aliases, and 7 retired
+> upstream models removed. Groups 6+7 unchanged. Details, evidence, and
+> gotchas: `OPENCODE_GO_ENDPOINT_SPLIT_RUNBOOK.md`. The rule below still
+> applies unchanged: a provider-exclusive alias needs exactly one mapping
+> owner and one exact per-group route.
+
 ## Rule — pin exclusive aliases with exact routes
 
 A provider-exclusive alias must have exactly one mapping owner AND one
