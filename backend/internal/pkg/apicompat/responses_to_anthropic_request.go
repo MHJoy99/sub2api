@@ -484,6 +484,15 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Source: src,
 				})
 			}
+		case "input_audio":
+			src, err := chatAudioToAnthropicSource(p.InputAudio)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, AnthropicContentBlock{
+				Type:   "audio",
+				Source: src,
+			})
 		}
 	}
 
@@ -491,6 +500,19 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 		return json.Marshal("")
 	}
 	return json.Marshal(blocks)
+}
+
+// chatAudioToAnthropicSource converts OpenAI input_audio into the Anthropic
+// base64 source shape used by the compatibility bridge.
+func chatAudioToAnthropicSource(audio *ChatInputAudio) (*AnthropicImageSource, error) {
+	if err := validateChatInputAudio(audio, 0); err != nil {
+		return nil, err
+	}
+	return &AnthropicImageSource{
+		Type:      "base64",
+		MediaType: ChatInputAudioMIMEType(audio.Format),
+		Data:      audio.Data,
+	}, nil
 }
 
 // convertResponsesAssistantToAnthropicContent converts a Responses assistant

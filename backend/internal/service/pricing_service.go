@@ -1297,6 +1297,12 @@ func normalizeGeminiThinkingTierAlias(model string) string {
 			}
 		}
 	}
+	const proBaseModel = "gemini-3-pro-preview"
+	for _, tier := range []string{"-high", "-low"} {
+		if model == "gemini-3-pro"+tier {
+			return proBaseModel
+		}
+	}
 	return model
 }
 

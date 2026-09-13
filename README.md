@@ -278,7 +278,7 @@ You can upgrade directly from the **Admin Dashboard** by clicking the **Check fo
 The web interface will:
 - Check for new versions automatically
 - Download and apply updates with one click
-- Support rollback if needed
+- Support rollback if needed; database rollback requires restoring a compatible backup because migrations are forward-only
 
 #### Useful Commands
 

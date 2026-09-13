@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -711,7 +712,7 @@ func TestBillingService_Gemini38FlashThinkingTierFallbacksAreBillable(t *testing
 	}
 }
 
-func TestDefaultPricingIncludesGemini36FlashRates(t *testing.T) {
+func TestDefaultPricingIncludesReportedGeminiFlashRates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
 
@@ -721,13 +722,46 @@ func TestDefaultPricingIncludesGemini36FlashRates(t *testing.T) {
 	pricingSvc.pricingData = pricingData
 	billingSvc := NewBillingService(&config.Config{}, pricingSvc)
 
-	for _, model := range []string{"gemini-3.6-flash", "gemini-3.6-flash-low", "gemini-3.6-flash-high"} {
+	for _, model := range []string{"gemini-3.6-flash", "gemini-3.6-flash-low", "gemini-3.6-flash-high", "gemini-3-flash-agent", "gemini-3.1-flash-lite", "gemini-3.5-flash-extra-low", "gemini-3.5-flash-low"} {
 		t.Run(model, func(t *testing.T) {
 			pricing, err := billingSvc.GetModelPricing(model)
 			require.NoError(t, err)
+			if model == "gemini-3.1-flash-lite" {
+				require.InDelta(t, 0.25e-6, pricing.InputPricePerToken, 1e-12)
+				require.InDelta(t, 1.5e-6, pricing.OutputPricePerToken, 1e-12)
+				require.InDelta(t, 0.025e-6, pricing.CacheReadPricePerToken, 1e-12)
+				return
+			}
+			if model == "gemini-3-flash-agent" || strings.HasPrefix(model, "gemini-3.5-flash-") {
+				require.InDelta(t, 1.5e-6, pricing.InputPricePerToken, 1e-12)
+				require.InDelta(t, 9e-6, pricing.OutputPricePerToken, 1e-12)
+				require.InDelta(t, 0.15e-6, pricing.CacheReadPricePerToken, 1e-12)
+				return
+			}
 			require.InDelta(t, 1.5e-6, pricing.InputPricePerToken, 1e-12)
 			require.InDelta(t, 7.5e-6, pricing.OutputPricePerToken, 1e-12)
 			require.InDelta(t, 0.15e-6, pricing.CacheReadPricePerToken, 1e-12)
+		})
+	}
+}
+
+func TestDefaultPricingIncludesOpenCodeGoMuseSpark13Contributor(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	pricingSvc := &PricingService{}
+	pricingData, err := pricingSvc.parsePricingData(data)
+	require.NoError(t, err)
+	pricingSvc.pricingData = pricingData
+	billingSvc := NewBillingService(&config.Config{}, pricingSvc)
+
+	for _, model := range []string{"muse-spark-1.3-contributor", "go-muse-spark-1.3-contributor"} {
+		t.Run(model, func(t *testing.T) {
+			pricing, err := billingSvc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, 0.1e-6, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, 0.2e-6, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, 0.002e-6, pricing.CacheReadPricePerToken, 1e-12)
 		})
 	}
 }

@@ -127,6 +127,8 @@ var DefaultAntigravityModelMapping = map[string]string{
 	"gemini-2.5-flash-lite":          "gemini-2.5-flash-lite",
 	"gemini-2.5-flash-thinking":      "gemini-2.5-flash-thinking",
 	"gemini-2.5-pro":                 "gemini-2.5-pro",
+	// JoyVoice custom alias: billed on the Gemini 2.5 Flash card, routed to gemini-2.5-flash.
+	"joyvoice-fast-audio": "gemini-2.5-flash",
 	// Gemini 3 白名单
 	"gemini-3-flash":    "gemini-3-flash",
 	"gemini-3-pro-high": "gemini-3-pro-high",
@@ -163,6 +165,12 @@ var DefaultAntigravityModelMapping = map[string]string{
 	"gemini-3.8-flash-low":    "gemini-3.8-flash-low",
 	"gemini-3.8-flash-medium": "gemini-3.8-flash-medium",
 	"gemini-3.8-flash-tiered": "gemini-3.8-flash-tiered",
+	// Models currently reported by Antigravity OAuth fetchAvailableModels.
+	"gemini-3-flash-agent":       "gemini-3-flash-agent",
+	"gemini-3.1-flash-lite":      "gemini-3.1-flash-lite",
+	"gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
+	"gemini-3.5-flash-low":       "gemini-3.5-flash-low",
+	"gemini-3.5-flash-lite":      "gemini-3.5-flash-lite",
 	// Gemini 3 image 兼容映射（向 3.1 image 迁移）
 	"gemini-3-pro-image":         "gemini-3.1-flash-image",
 	"gemini-3-pro-image-preview": "gemini-3.1-flash-image",

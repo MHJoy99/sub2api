@@ -542,6 +542,8 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse
 
 	// Only reasoning metadata needs decoding. Keep large image/tool results as
 	// slices of the original JSON and copy them once into the final request.
+	// Local Decoded semantics: reasoning items without encrypted content and
+	// rs_ item references are dropped, not stripped.
 	items := make([]string, 0)
 	changed := false
 	fallback := false

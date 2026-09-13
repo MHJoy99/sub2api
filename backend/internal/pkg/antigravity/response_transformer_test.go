@@ -107,3 +107,13 @@ func BenchmarkGenerateRandomID(b *testing.B) {
 		_ = generateRandomID()
 	}
 }
+
+func TestStreamingProcessor_EmitFinishSafetyNotice(t *testing.T) {
+	proc := NewStreamingProcessor("gemini-3.7-flash-tiered")
+	data := proc.emitFinish("SAFETY")
+	s := string(data)
+	assert.Contains(t, s, "content_block_start")
+	assert.Contains(t, s, "Response blocked by upstream Gemini safety filter (SAFETY)")
+	assert.Contains(t, s, "content_block_stop")
+	assert.Contains(t, s, "message_delta")
+}

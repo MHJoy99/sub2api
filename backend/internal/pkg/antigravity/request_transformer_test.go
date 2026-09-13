@@ -150,6 +150,18 @@ func TestBuildParts_ToolUseSignatureHandling(t *testing.T) {
 	})
 }
 
+func TestBuildParts_AudioBlockPreservesGeminiInlineData(t *testing.T) {
+	const audioData = "UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	parts, _, err := buildParts(json.RawMessage(`[
+		{"type":"audio","source":{"type":"base64","media_type":"audio/wav","data":"`+audioData+`"}}
+	]`), make(map[string]string), true)
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	require.NotNil(t, parts[0].InlineData)
+	require.Equal(t, "audio/wav", parts[0].InlineData.MimeType)
+	require.Equal(t, audioData, parts[0].InlineData.Data)
+}
+
 // TestBuildTools_CustomTypeTools 测试custom类型工具转换
 func TestBuildTools_CustomTypeTools(t *testing.T) {
 	tests := []struct {
@@ -654,5 +666,25 @@ func TestToolConfigAlwaysPresent(t *testing.T) {
 			require.NotNil(t, req.Request.ToolConfig.FunctionCallingConfig)
 			require.Equal(t, "VALIDATED", req.Request.ToolConfig.FunctionCallingConfig.Mode)
 		})
+	}
+}
+func TestTransformClaudeToGeminiWithOptions_IncludesDefaultSafetySettings(t *testing.T) {
+	claudeReq := &ClaudeRequest{
+		Model: "gemini-3.7-flash-tiered",
+		Messages: []ClaudeMessage{
+			{
+				Role:    "user",
+				Content: json.RawMessage(`"test prompt"`),
+			},
+		},
+	}
+	body, err := TransformClaudeToGeminiWithOptions(claudeReq, "project-1", "gemini-3.7-flash-tiered", DefaultTransformOptions())
+	require.NoError(t, err)
+
+	var req V1InternalRequest
+	require.NoError(t, json.Unmarshal(body, &req))
+	require.Len(t, req.Request.SafetySettings, 5)
+	for _, ss := range req.Request.SafetySettings {
+		require.Equal(t, "OFF", ss.Threshold)
 	}
 }

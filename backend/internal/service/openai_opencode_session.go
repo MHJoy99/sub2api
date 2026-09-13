@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -169,4 +170,47 @@ func existingOpenCodeSessionHeader(headers http.Header) string {
 		}
 	}
 	return ""
+}
+
+// synthesizeOpenCodeSessionHeader injects a stable per-conversation ID when the
+// caller omitted one (e.g. Kilo Code VS Code extension, generic OpenAI
+// clients). Local extension beyond upstream #6581: applyOpenCodeSessionHeader
+// above only mints a last-resort UUID for OpenCode Go-plan accounts and the
+// /zen/go path — without this fallback, header-less clients on the official
+// origin still get upstream 400 `missing x-opencode-session`.
+//
+// Runs after applyOpenCodeSessionHeader, so it only fills when the header is
+// still absent. Priority: explicit session identity
+// (X-Session-Id / X-Session-Affinity / session_id / prompt_cache_key), then a
+// deterministic tenant-isolated UUID from the content seed (stable across turns
+// sharing the same system/first-prompt prefix), then a random UUID last resort
+// (satisfies the presence check with no cache affinity — clients should send a
+// stable ID). Scoped to the official origin like the verbatim path.
+func synthesizeOpenCodeSessionHeader(c *gin.Context, body []byte, account *Account, targetURL string, headers http.Header) {
+	if headers == nil || account == nil || account.Type != AccountTypeAPIKey {
+		return
+	}
+	if account.UsesOpenAICodexProtocol() {
+		return
+	}
+	if !isOfficialOpenCodeHost(targetURL) {
+		return
+	}
+	if strings.TrimSpace(headers.Get(openCodeSessionHeader)) != "" {
+		return
+	}
+	if raw := sanitizeSessionID(explicitOpenAIRequestSessionID(c, body)); raw != "" {
+		headers.Set(openCodeSessionHeader, raw)
+		return
+	}
+	var apiKeyID int64
+	if c != nil {
+		apiKeyID = getAPIKeyIDFromContext(c)
+	}
+	if seed := deriveOpenAIContentSessionSeed(body); seed != "" {
+		headers.Set(openCodeSessionHeader, generateSessionUUID(
+			fmt.Sprintf("opencode-go:%d:%d:%s", apiKeyID, account.ID, seed)))
+		return
+	}
+	headers.Set(openCodeSessionHeader, generateSessionUUID(""))
 }

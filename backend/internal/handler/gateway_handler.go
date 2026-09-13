@@ -408,6 +408,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					if fs.RecordSlotBusy(account.ID) == FailoverContinue {
+						reqLog.Info("gateway.account_wait_queue_full_spillover",
+							zap.Int64("account_id", account.ID),
+							zap.Int("spills", fs.SlotBusySpills()),
+						)
+						continue
+					}
 					h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -432,6 +439,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					if isWaitQueueFullError(err) && fs.RecordSlotBusy(account.ID) == FailoverContinue {
+						reqLog.Info("gateway.account_slot_busy_spillover",
+							zap.Int64("account_id", account.ID),
+							zap.Int("spills", fs.SlotBusySpills()),
+						)
+						continue
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
@@ -749,6 +763,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					if fs.RecordSlotBusy(account.ID) == FailoverContinue {
+						reqLog.Info("gateway.account_wait_queue_full_spillover",
+							zap.Int64("account_id", account.ID),
+							zap.Int("spills", fs.SlotBusySpills()),
+						)
+						continue
+					}
 					h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -773,6 +794,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					if isWaitQueueFullError(err) && fs.RecordSlotBusy(account.ID) == FailoverContinue {
+						reqLog.Info("gateway.account_slot_busy_spillover",
+							zap.Int64("account_id", account.ID),
+							zap.Int("spills", fs.SlotBusySpills()),
+						)
+						continue
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}

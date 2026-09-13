@@ -75,7 +75,10 @@ Composite routing detects common public model IDs and provider-prefixed IDs:
 - `kimi-*`, `moonshot-*`, and `k3` route to Kimi.
 - `glm-*` routes to Zhipu GLM.
 - `deepseek-*` routes to DeepSeek.
-- `minimax-*`, `abab*`, and `minimax/*` route to MiniMax.
+- `kimi-*`, `moonshot-*`, and `k3` route to Kimi.
+- `glm-*` routes to Zhipu GLM.
+- `deepseek-*` routes to DeepSeek.
+- `minimax-*` and `abab5/6/7*` route to MiniMax.
 
 Unknown or ambiguous model names fail closed with a client error instead of
 guessing a provider.
@@ -95,11 +98,12 @@ guessing a provider.
   The channel `group_ids` payload is still flat; provider-specific model
   mapping and pricing remain keyed by concrete platform.
 
-## Bucket 2 Setup: OpenAI + Claude + Gemini + Grok
+## Example Setup: OpenAI + Claude + Gemini + Grok
 
 Use one composite subscription group when one customer-facing plan should expose
 model aliases across OpenAI, Claude, Gemini, and Grok without issuing separate
-keys per provider.
+keys per provider. This is an illustrative setup; the deployed instance is
+documented in [Production Setup: All Providers](#production-setup-all-providers).
 
 1. Create concrete provider groups for the upstream account pools, for example
    `OpenAI Paid`, `Claude Paid`, `Gemini Paid`, and `Grok Paid`.
@@ -125,6 +129,61 @@ names such as `gpt-*`, `claude-*`, `gemini-*`, and `grok-*`. Explicit routes are
 recommended for bundled plan aliases because they make endpoint, provider, and
 upstream model attribution reviewable in the admin UI.
 
+## Production Setup: All Providers
+
+As of 2026-08-28, the production instance uses separate provider groups plus a
+full-access composite group:
+
+| Group | ID | Purpose | Accounts | Routes |
+| --- | ---: | --- | ---: | ---: |
+| `All Models` | 4 | Existing unified client access | 6 | 8 |
+| `Alibaba Token Plan` | 5 | Isolated Alibaba Token Plan account | 1 | 0 |
+| `OpenCode Go` | 6 | Isolated OpenCode Go account | 1 | 0 |
+| `All Providers` | 7 | One-key access across all configured providers | 8 | 52 |
+
+Group 7 copies accounts from groups 4, 5, and 6 and uses exact routes for the
+44 Alibaba and Go aliases. The route target is `openai`, but the route leaves
+the upstream model at the public alias so account 23 or 24 can apply its own
+account-level mapping. Do not replace these exact routes with one broad
+`target_platform=openai` route: both OpenAI-compatible accounts expose some of
+the same bare upstream model names, and broad routing can select the wrong
+provider.
+
+The owner full-access key is stored locally as `all_providers` in the
+mode-600, git-ignored `deploy/owner-api-keys.json`. The existing `all_models`
+key remains bound to group 4, while `alibaba_token_plan` and `opencode_go`
+remain available for provider-isolated clients. API keys bind to one group;
+use group 7 when a client needs one key for all configured models.
+
+Deployed key-to-group map:
+
+| Local key name | Group | Use |
+| --- | ---: | --- |
+| `all_models` | 4 | Existing unified models only |
+| `alibaba_token_plan` | 5 | Alibaba-only access |
+| `opencode_go` | 6 | OpenCode Go-only access |
+| `all_providers` | 7 | All configured provider models |
+
+The group-4 key intentionally returns HTTP 400 for the isolated Alibaba and Go
+aliases. Use `all_providers` for one-key access to those aliases:
+
+```bash
+curl https://YOUR_HOST/v1/chat/completions \
+  -H "Authorization: Bearer $ALL_PROVIDERS_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"alibaba-token-plan-qwen3.7-plus","messages":[{"role":"user","content":"ready"}]}'
+```
+
+Verification for the deployed setup:
+
+- `alibaba-token-plan-qwen3.7-plus` selects account 23 through group 7.
+- `go-glm-5` selects account 24 through group 7.
+- `gemini-3.7-flash-tiered` selects the antigravity pool through group 7.
+- `GET /v1/models` through the group-7 key returns 85 models.
+
+The detailed migration record, database checks, backup path, and API payloads
+are maintained in [`PRICING_MAPPING_RUNBOOK.md`](../PRICING_MAPPING_RUNBOOK.md).
+
 ## Limits
 
 Composite routes choose a concrete provider and upstream model; they do not
@@ -132,7 +191,7 @@ create synthetic model metadata, pricing, or upstream capability records by
 themselves. Keep channel pricing/model mapping configured for the concrete
 provider platforms that the routes target.
 
-This PR intentionally does not implement:
+Current limitations:
 
 - AUTO smart-routing among multiple providers for the same abstract task.
 - Direct API-key binding to several existing groups without a composite group.

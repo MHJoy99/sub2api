@@ -510,6 +510,18 @@ func (p *StreamingProcessor) emitFinish(finishReason string) []byte {
 		}
 	}
 
+	if p.blockIndex == 0 && !p.usedTool && (finishReason == "SAFETY" || finishReason == "BLOCKLIST" || finishReason == "PROHIBITED_CONTENT") {
+		safetyNotice := fmt.Sprintf("[Response blocked by upstream Gemini safety filter (%s). Please rephrase your prompt.]", finishReason)
+		_, _ = result.Write(p.startBlock(BlockTypeText, map[string]any{
+			"type": "text",
+			"text": "",
+		}))
+		_, _ = result.Write(p.emitDelta("text_delta", map[string]any{
+			"text": safetyNotice,
+		}))
+		_, _ = result.Write(p.endBlock())
+	}
+
 	// 确定 stop_reason
 	stopReason := "end_turn"
 	if p.usedTool {

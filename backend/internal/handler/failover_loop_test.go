@@ -156,6 +156,32 @@ func TestNewFailoverState(t *testing.T) {
 	})
 }
 
+func TestRecordSlotBusy(t *testing.T) {
+	t.Run("队列满溢出继续并排除账号", func(t *testing.T) {
+		fs := NewFailoverState(3, false)
+		for _, id := range []int64{25, 1, 3} {
+			require.Equal(t, FailoverContinue, fs.RecordSlotBusy(id))
+		}
+		require.Len(t, fs.FailedAccountIDs, 3)
+		require.Contains(t, fs.FailedAccountIDs, int64(25))
+		require.Equal(t, 3, fs.SlotBusySpills())
+	})
+
+	t.Run("超过上限后终止", func(t *testing.T) {
+		fs := NewFailoverState(2, false)
+		require.Equal(t, FailoverContinue, fs.RecordSlotBusy(25))
+		require.Equal(t, FailoverContinue, fs.RecordSlotBusy(1))
+		require.Equal(t, FailoverExhausted, fs.RecordSlotBusy(3))
+		require.Len(t, fs.FailedAccountIDs, 3)
+	})
+}
+
+func TestIsWaitQueueFullError(t *testing.T) {
+	require.True(t, isWaitQueueFullError(&WaitQueueFullError{SlotType: "account"}))
+	require.False(t, isWaitQueueFullError(nil))
+	require.False(t, isWaitQueueFullError(context.DeadlineExceeded))
+}
+
 // ---------------------------------------------------------------------------
 // sleepWithContext 测试
 // ---------------------------------------------------------------------------

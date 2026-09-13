@@ -45,6 +45,11 @@ func TestIsModelSupported_OpenAIOAuthEmptyMapping_RejectsForeignModels(t *testin
 	// Codex 上游必然以不可重试的 400 拒绝这些厂商家族；调度阶段就应跳过
 	// 该账号，让显式声明支持的 API Key 账号接手（#3662）。
 	foreign := []string{
+		"go-muse-spark-1.3-contributor", // OpenCode Go exclusive alias must not spill to ChatGPT OAuth (account 5)
+		"go-qwen3.8-max",
+		"muse-spark-1.3-contributor", // bare form, same owner (account 24)
+		"mimo-v2.5",
+		"ox-alpha-free",
 		"deepseek-v4",
 		"deepseek-chat",
 		"glm-4.7",

@@ -157,3 +157,19 @@ output/
 .vite/
 # 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
 /plugins/
+
+# ===================
+# BDX local dirty (keep VS Code clean)
+# ===================
+sub2api_usage_*.csv
+sub2api_usage_*.json
+*.wav
+*.m4a
+.account22-extra-backup-*.json
+.luna-route-backup-*.json
+Webshare*.txt
+deploy/__pycache__/
+deploy/artifacts/
+deploy/owner-api-keys.json
+deploy/sub2api-*.sql
+.zcode/

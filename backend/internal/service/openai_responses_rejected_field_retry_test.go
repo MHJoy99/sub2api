@@ -452,6 +452,21 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesModelRejectedPromp
 	}
 }
 
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesNestedPromptCacheBreakpoints(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-luna","prompt_cache_options":{"mode":"explicit"},"input":[{"role":"developer","content":[{"type":"input_text","text":"stable","prompt_cache_breakpoint":{"mode":"explicit"}}]},{"type":"function_call_output","output":[{"type":"input_text","text":"tool result","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`)
+	responseBody := []byte(`{"error":{"code":"invalid_parameter","message":"prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}}`)
+
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "prompt_cache_breakpoint parameter rejection", reason)
+	require.False(t, gjson.GetBytes(retryBody, "input.0.content.0.prompt_cache_breakpoint").Exists())
+	require.False(t, gjson.GetBytes(retryBody, "input.1.output.0.prompt_cache_breakpoint").Exists())
+	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(retryBody, "model").String())
+	require.Equal(t, "explicit", gjson.GetBytes(retryBody, "prompt_cache_options.mode").String())
+}
+
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRejectsAmbiguousPromptCacheBreakpointErrors(t *testing.T) {
 	body := []byte(`{"prompt_cache_breakpoint":{"type":"message_start"},"input":[{"type":"message","prompt_cache_breakpoint":{"type":"message_end"}}]}`)
 	tests := []struct {

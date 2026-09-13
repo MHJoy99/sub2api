@@ -223,6 +223,16 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 					ImageURL: &ChatImageURL{URL: uri},
 				})
 			}
+		case "audio":
+			audio, err := anthropicAudioToChatAudio(b.Source)
+			if err != nil {
+				return nil, err
+			}
+			hasImage = true
+			parts = append(parts, ChatContentPart{
+				Type:       "input_audio",
+				InputAudio: audio,
+			})
 		}
 	}
 	if len(toolResultImageParts) > 0 {

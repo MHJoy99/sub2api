@@ -35,6 +35,11 @@ func TestDefaultModels_ContainsNewAndLegacyImageModels(t *testing.T) {
 		"gemini-3.8-flash-high",
 		"gemini-3.8-flash-low",
 		"gemini-3.8-flash-medium",
+		"gemini-3-flash-agent",
+		"gemini-3.1-flash-lite",
+		"gemini-3.5-flash-extra-low",
+		"gemini-3.5-flash-low",
+		"gemini-3.5-flash-lite",
 		"gemini-3.8-flash-tiered",
 	}
 

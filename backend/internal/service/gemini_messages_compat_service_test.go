@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type geminiCompatHTTPUpstreamStub struct {
@@ -726,6 +727,32 @@ func TestEnsureGeminiFunctionCallThoughtSignatures_InsertsWhenMissing(t *testing
 	if !strings.Contains(s, "\"thoughtSignature\":\""+geminiDummyThoughtSignature+"\"") {
 		t.Fatalf("expected injected thoughtSignature %q, got: %s", geminiDummyThoughtSignature, s)
 	}
+}
+
+func TestConvertClaudeMessagesToGeminiGenerateContentPreservesAudioInlineData(t *testing.T) {
+	const audioData = "UklGRjQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	claudeReq := map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "Transcribe this"},
+					map[string]any{"type": "audio", "source": map[string]any{
+						"type":       "base64",
+						"media_type": "audio/wav",
+						"data":       audioData,
+					}},
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(claudeReq)
+	require.NoError(t, err)
+
+	out, err := convertClaudeMessagesToGeminiGenerateContent(body)
+	require.NoError(t, err)
+	require.Equal(t, "audio/wav", gjson.GetBytes(out, "contents.0.parts.1.inlineData.mimeType").String())
+	require.Equal(t, audioData, gjson.GetBytes(out, "contents.0.parts.1.inlineData.data").String())
 }
 
 // TestUnwrapGeminiResponse 测试 unwrapGeminiResponse 的各种输入场景

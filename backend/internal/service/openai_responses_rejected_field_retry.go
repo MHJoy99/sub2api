@@ -138,12 +138,14 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	cacheParamMatchesMessage := cacheMessageParam == "" || cacheParam == cacheMessageParam
 	cacheModelRejection := code == "invalid_parameter" || cacheMessageParam != ""
 	if cacheParam != "" && cacheParamMatchesMessage && cacheModelRejection {
-		if cacheParam == "prompt_cache_breakpoint" && gjson.GetBytes(body, cacheParam).Exists() {
-			retryBody, err := sjson.DeleteBytes(body, cacheParam)
+		if cacheParam == "prompt_cache_breakpoint" {
+			retryBody, changed, err := removeAllOpenAIResponsesPromptCacheBreakpoints(body)
 			if err != nil {
 				return nil, "", false, fmt.Errorf("delete rejected prompt_cache_breakpoint: %w", err)
 			}
-			return retryBody, "prompt_cache_breakpoint parameter rejection", true, nil
+			if changed {
+				return retryBody, "prompt_cache_breakpoint parameter rejection", true, nil
+			}
 		}
 		if index, ok := openAIResponsesRejectedCacheIndex(cacheParam); ok {
 			return removeOpenAIResponsesRejectedCacheAtIndex(body, index)
@@ -339,6 +341,50 @@ func removeOpenAIResponsesRejectedCacheAtIndex(body []byte, index int) ([]byte, 
 		return nil, "", false, fmt.Errorf("delete rejected prompt_cache_breakpoint at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed prompt_cache_breakpoint parameter rejection", true, nil
+}
+
+// removeAllOpenAIResponsesPromptCacheBreakpoints handles providers that reject
+// the generic prompt_cache_breakpoint parameter while returning the official
+// nested Responses API shape (for example input[].content[] or output[]).
+func removeAllOpenAIResponsesPromptCacheBreakpoints(body []byte) ([]byte, bool, error) {
+	paths := make([]string, 0)
+	var visit func(gjson.Result, string)
+	visit = func(value gjson.Result, path string) {
+		if !value.IsObject() && !value.IsArray() {
+			return
+		}
+		value.ForEach(func(key, child gjson.Result) bool {
+			childPath := path
+			if childPath != "" {
+				childPath += "."
+			}
+			if value.IsArray() {
+				childPath += strconv.FormatInt(key.Int(), 10)
+			} else {
+				childPath += key.Str
+			}
+			if !value.IsArray() && key.Str == "prompt_cache_breakpoint" {
+				paths = append(paths, childPath)
+				return true
+			}
+			visit(child, childPath)
+			return true
+		})
+	}
+	visit(gjson.ParseBytes(body), "")
+	if len(paths) == 0 {
+		return body, false, nil
+	}
+
+	retryBody := body
+	for _, path := range paths {
+		var err error
+		retryBody, err = sjson.DeleteBytes(retryBody, path)
+		if err != nil {
+			return nil, false, fmt.Errorf("delete prompt_cache_breakpoint at %s: %w", path, err)
+		}
+	}
+	return retryBody, true, nil
 }
 
 func normalizeOpenAIResponsesRejectedNullContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
