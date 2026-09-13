@@ -214,3 +214,27 @@ fix degrades gracefully (drop search, keep functions, warn in logs) per
 LiteLLM precedent instead of hard-400.
 
 MD docs updated — stale MDs deleted, new MDs created where missing.
+
+## 7. Upstream Contributions (10 PR branches, ready to open)
+
+All fixes repackaged as minimal per-issue branches off `origin/main`,
+pushed to `MHJoy99/sub2api` (local git holds everything):
+
+| Branch | Issues | Content |
+|---|---|---|
+| contrib/upstream-7088-json-format | #7088 | responseMimeType injection + test |
+| contrib/upstream-7081-malformed-call | #7081 | visible retryable text on MALFORMED |
+| contrib/upstream-7080-mixed-tools | #7080 | drop-search degrade + tests (live: 400→200) |
+| contrib/upstream-5203-ping-filter | #5203 | ping filter only |
+| contrib/upstream-thinking-models | #6985 #6419 #6897 | thinkingLevel, hub UA, Claude 5 routing + test |
+| contrib/upstream-6999-codex-catalog | #6999 | provider strip, MiMo levels, metadata keep + test |
+| contrib/upstream-7027-codex-json | #7027 | omit dup prompt + minimal directive + test (live 200) |
+| contrib/upstream-db-rollup | #6976 #7030 | migration 239, 026 guards, compat rule, advisory lock (live applied) |
+| contrib/upstream-6804-cn-429 | #6804 | frequency guard + 95% rule + tests |
+| contrib/upstream-stream-watchdog | #5290 #3603 | first-token watchdog, identity encoding |
+
+BLOCKED: `MHJoy99/sub2api` is not a GitHub fork of `Wei-Shaw/sub2api`,
+so cross-repo PR creation fails. Needs proper fork, then `gh pr create`
+per branch (PR bodies drafted from live evidence in §6).
+
+MD docs updated — stale MDs deleted, new MDs created where missing.
