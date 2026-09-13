@@ -66,6 +66,7 @@ type GeminiGenerationConfig struct {
 	TopP            *float64              `json:"topP,omitempty"`
 	TopK            *int                  `json:"topK,omitempty"`
 	ThinkingConfig  *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	ResponseMimeType string                `json:"responseMimeType,omitempty"`
 	StopSequences   []string              `json:"stopSequences,omitempty"`
 	ImageConfig     *GeminiImageConfig    `json:"imageConfig,omitempty"`
 }
@@ -78,8 +79,9 @@ type GeminiImageConfig struct {
 
 // GeminiThinkingConfig Gemini thinking 配置
 type GeminiThinkingConfig struct {
-	IncludeThoughts bool `json:"includeThoughts"`
-	ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+	IncludeThoughts bool   `json:"includeThoughts"`
+	ThinkingBudget  int    `json:"thinkingBudget,omitempty"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
 // GeminiToolDeclaration Gemini 工具声明
@@ -118,6 +120,7 @@ type GeminiImageSearch struct {
 type GeminiToolConfig struct {
 	FunctionCallingConfig            *GeminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
 	IncludeServerSideToolInvocations *bool                        `json:"includeServerSideToolInvocations,omitempty"`
+	IncludeServerSideToolInvocationsSnake *bool                   `json:"include_server_side_tool_invocations,omitempty"`
 }
 
 // GeminiFunctionCallingConfig 函数调用配置

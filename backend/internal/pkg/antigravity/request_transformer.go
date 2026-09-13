@@ -163,6 +163,7 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	if hasMixedToolInvocations(tools) {
 		enabled := true
 		innerRequest.ToolConfig.IncludeServerSideToolInvocations = &enabled
+		innerRequest.ToolConfig.IncludeServerSideToolInvocationsSnake = &enabled
 	}
 
 	if systemInstruction != nil {
@@ -222,6 +223,8 @@ type modelInfo struct {
 // 只有在此映射表中的模型才会注入身份提示词
 // 注意：模型映射逻辑在网关层完成；这里仅用于按模型前缀判断是否注入身份提示词。
 var modelInfoMap = map[string]modelInfo{
+	"claude-opus-5":     {DisplayName: "Claude Opus 5", CanonicalID: "claude-opus-5"},
+	"claude-sonnet-5":   {DisplayName: "Claude Sonnet 5", CanonicalID: "claude-sonnet-5"},
 	"claude-fable-5-1":  {DisplayName: "Claude Fable 5.1", CanonicalID: "claude-fable-5-1"},
 	"claude-fable-5":    {DisplayName: "Claude Fable 5", CanonicalID: "claude-fable-5"},
 	"claude-opus-4-8":   {DisplayName: "Claude Opus 4.8", CanonicalID: "claude-opus-4-8"},
@@ -665,7 +668,20 @@ func buildGenerationConfig(req *ClaudeRequest) *GeminiGenerationConfig {
 				config.MaxOutputTokens = adjusted
 			}
 		}
-		config.ThinkingConfig.ThinkingBudget = budget
+		// Gemini 3.x models require thinkingLevel instead of thinkingBudget
+		lowerModel := strings.ToLower(req.Model)
+		if strings.Contains(lowerModel, "gemini-3.") || strings.Contains(lowerModel, "gemini-3-") {
+			level := "high"
+			if strings.HasSuffix(lowerModel, "-low") {
+				level = "low"
+			} else if strings.HasSuffix(lowerModel, "-medium") {
+				level = "medium"
+			}
+			config.ThinkingConfig.ThinkingLevel = level
+			config.ThinkingConfig.ThinkingBudget = 0
+		} else {
+			config.ThinkingConfig.ThinkingBudget = budget
+		}
 	}
 
 	if config.MaxOutputTokens > maxLimit {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 type antigravityCompatProtocol uint8
@@ -430,12 +432,34 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
 			body = cleaned
 		}
+		body = ensureGeminiResponseFormatJSON(body, claudeBody)
 		return s.wrapV1InternalRequest(projectID, mappedModel, body)
 	}
 
 	options := s.getClaudeTransformOptions(ctx)
 	options.EnableIdentityPatch = true
 	return antigravity.TransformClaudeToGeminiWithOptions(claudeRequest, projectID, mappedModel, options)
+}
+
+func ensureGeminiResponseFormatJSON(body []byte, claudeBody []byte) []byte {
+	if !gjson.GetBytes(claudeBody, "response_format").Exists() && !bytes.Contains(claudeBody, []byte(`"json_object"`)) {
+		return body
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body
+	}
+	genCfg, _ := req["generationConfig"].(map[string]any)
+	if genCfg == nil {
+		genCfg = make(map[string]any)
+		req["generationConfig"] = genCfg
+	}
+	genCfg["responseMimeType"] = "application/json"
+	out, err := json.Marshal(req)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {

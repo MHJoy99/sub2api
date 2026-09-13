@@ -707,7 +707,9 @@ func deepSeekCodexDisplayName(modelID string) string {
 }
 
 func isDeepSeekCodexModel(modelID string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelID)), "deepseek-")
+	lower := strings.ToLower(strings.TrimSpace(modelID))
+	lower = strings.TrimPrefix(lower, "deepseek/")
+	return strings.HasPrefix(lower, "deepseek-")
 }
 
 func isGrokCodexModel(modelID string) bool {

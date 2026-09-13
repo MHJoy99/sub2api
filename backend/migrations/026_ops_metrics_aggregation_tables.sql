@@ -47,7 +47,17 @@ CREATE INDEX IF NOT EXISTS idx_ops_metrics_hourly_platform_bucket_start
 COMMENT ON TABLE ops_metrics_hourly IS 'Pre-aggregated hourly ops metrics by provider/platform to speed up dashboard queries.';
 COMMENT ON COLUMN ops_metrics_hourly.bucket_start IS 'Start timestamp of the hour bucket (recommended UTC).';
 COMMENT ON COLUMN ops_metrics_hourly.platform IS 'Provider/platform label (anthropic/openai/gemini, etc).';
-COMMENT ON COLUMN ops_metrics_hourly.error_rate IS 'Error rate percentage for the bucket (0-100). Counts remain the source of truth.';
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name   = 'ops_metrics_hourly'
+          AND column_name  = 'error_rate'
+    ) THEN
+        EXECUTE 'COMMENT ON COLUMN ops_metrics_hourly.error_rate IS ''Error rate percentage for the bucket (0-100). Counts remain the source of truth.''';
+    END IF;
+END $$;
 COMMENT ON COLUMN ops_metrics_hourly.computed_at IS 'When the row was last computed/refreshed.';
 
 -- ============================================

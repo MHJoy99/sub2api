@@ -528,6 +528,19 @@ func (p *StreamingProcessor) emitFinish(finishReason string) []byte {
 		stopReason = "tool_use"
 	} else if finishReason == "MAX_TOKENS" {
 		stopReason = "max_tokens"
+	} else if finishReason == "MALFORMED_FUNCTION_CALL" {
+		// If Gemini failed to parse function arguments, emit explicit tool_use error rather than empty success
+		if p.blockType == BlockTypeNone {
+			_, _ = result.Write(p.startBlock(BlockTypeText, map[string]any{
+				"type": "text",
+				"text": "",
+			}))
+			_, _ = result.Write(p.emitDelta("text_delta", map[string]any{
+				"text": "Upstream returned MALFORMED_FUNCTION_CALL",
+			}))
+			_, _ = result.Write(p.endBlock())
+		}
+		stopReason = "error"
 	}
 
 	usage := ClaudeUsage{
