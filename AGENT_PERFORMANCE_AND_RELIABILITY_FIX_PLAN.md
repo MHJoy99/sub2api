@@ -238,3 +238,26 @@ so cross-repo PR creation fails. Needs proper fork, then `gh pr create`
 per branch (PR bodies drafted from live evidence in §6).
 
 MD docs updated — stale MDs deleted, new MDs created where missing.
+
+## 8. Upstream PRs Opened (2026-09-13)
+
+Public fork `MHJoy99/sub2api` created; private repo renamed to
+`MHJoy99/sub2api-private` (remote updated, untouched otherwise).
+
+| PR | Branch | Fixes |
+|---|---|---|
+| #7097 | contrib/upstream-5203-ping-filter | #5203 |
+| #7098 | contrib/upstream-7081-malformed-call | #7081 |
+| #7099 | contrib/upstream-7088-json-format | #7088 |
+| #7100 | contrib/upstream-7080-mixed-tools | #7080 |
+| #7101 | contrib/upstream-thinking-models | #6985 #6419 #6897 |
+| #7102 | contrib/upstream-6999-codex-catalog | #6999 |
+| #7103 | contrib/upstream-7027-codex-json | #7027 |
+| #7104 | contrib/upstream-db-rollup | #6976 #7030 |
+| #7105 | contrib/upstream-6804-cn-429 | #6804 |
+| #7106 | contrib/upstream-stream-watchdog | #5290 #3603 |
+
+Each `Fixes #…` auto-links into the issue threads, so reporters find
+the branches with no maintainer action needed.
+
+MD docs updated — stale MDs deleted, new MDs created where missing.
