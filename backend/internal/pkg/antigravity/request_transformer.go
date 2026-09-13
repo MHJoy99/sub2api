@@ -867,13 +867,13 @@ func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
 	}
 
 	var declarations []GeminiToolDeclaration
-	if len(funcDecls) > 0 {
+	// #7080: when built-in search is combined with function calling,
+	// upstream requires googleSearch in the SAME tools entry as
+	// functionDeclarations (plus the toolConfig flag). Separate entries
+	// are rejected with "enable tool_config..." even when the flag is set.
+	if len(funcDecls) > 0 && hasWebSearch {
 		declarations = append(declarations, GeminiToolDeclaration{
 			FunctionDeclarations: funcDecls,
-		})
-	}
-	if hasWebSearch {
-		declarations = append(declarations, GeminiToolDeclaration{
 			GoogleSearch: &GeminiGoogleSearch{
 				EnhancedContent: &GeminiEnhancedContent{
 					ImageSearch: &GeminiImageSearch{
@@ -882,6 +882,23 @@ func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
 				},
 			},
 		})
+	} else {
+		if len(funcDecls) > 0 {
+			declarations = append(declarations, GeminiToolDeclaration{
+				FunctionDeclarations: funcDecls,
+			})
+		}
+		if hasWebSearch {
+			declarations = append(declarations, GeminiToolDeclaration{
+				GoogleSearch: &GeminiGoogleSearch{
+					EnhancedContent: &GeminiEnhancedContent{
+						ImageSearch: &GeminiImageSearch{
+							MaxResultCount: 5,
+						},
+					},
+				},
+			})
+		}
 	}
 	if hasCodeExecution {
 		declarations = append(declarations, GeminiToolDeclaration{

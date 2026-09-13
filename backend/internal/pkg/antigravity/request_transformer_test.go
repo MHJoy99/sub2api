@@ -289,13 +289,15 @@ func TestBuildTools_PreservesWebSearchAlongsideFunctions(t *testing.T) {
 	}
 
 	result := buildTools(tools)
-	require.Len(t, result, 2)
+	// #7080: mixed built-in + function tools share one entry so upstream
+	// accepts the combination alongside the toolConfig flag.
+	require.Len(t, result, 1)
 	require.Len(t, result[0].FunctionDeclarations, 1)
 	require.Equal(t, "get_weather", result[0].FunctionDeclarations[0].Name)
-	require.NotNil(t, result[1].GoogleSearch)
-	require.NotNil(t, result[1].GoogleSearch.EnhancedContent)
-	require.NotNil(t, result[1].GoogleSearch.EnhancedContent.ImageSearch)
-	require.Equal(t, 5, result[1].GoogleSearch.EnhancedContent.ImageSearch.MaxResultCount)
+	require.NotNil(t, result[0].GoogleSearch)
+	require.NotNil(t, result[0].GoogleSearch.EnhancedContent)
+	require.NotNil(t, result[0].GoogleSearch.EnhancedContent.ImageSearch)
+	require.Equal(t, 5, result[0].GoogleSearch.EnhancedContent.ImageSearch.MaxResultCount)
 }
 
 func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
@@ -572,10 +574,10 @@ func TestTransformClaudeToGeminiWithOptions_PreservesWebSearchAlongsideFunctions
 
 	var req V1InternalRequest
 	require.NoError(t, json.Unmarshal(body, &req))
-	require.Len(t, req.Request.Tools, 2)
+	require.Len(t, req.Request.Tools, 1)
 	require.Len(t, req.Request.Tools[0].FunctionDeclarations, 1)
 	require.Equal(t, "get_weather", req.Request.Tools[0].FunctionDeclarations[0].Name)
-	require.NotNil(t, req.Request.Tools[1].GoogleSearch)
+	require.NotNil(t, req.Request.Tools[0].GoogleSearch)
 }
 
 func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
