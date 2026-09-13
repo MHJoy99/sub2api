@@ -163,3 +163,27 @@ fixes were partial and 5 issues untouched. All gaps closed below.
   timeout); targeted coverage above exercises every touched path.
 
 MD docs updated — stale MDs deleted, new MDs created where missing.
+
+## 5. Deploy & Live Verification (2026-09-13)
+
+- Pushed `ours` → `mhjoy/ours` (`5a66adb88..606c28c50`, 12 commits).
+- Rebuilt via `deploy/deploy-sub2api.sh` → image
+  `sub2api:deploy-20260913044636-606c28c50`, container `sub2api`
+  recreated, healthcheck `healthy`, Postgres/Redis/data untouched.
+- Startup clean: no migration checksum errors (026 compat rule
+  accepted), no fatal errors in logs.
+- DB verified: `schema_migrations` contains `026_*` and
+  `239_group_rollup_trigger_no_row_lock.sql`; trigger function body
+  confirmed lock-free with guarded conditional UPDATE.
+- Live binary (`/app/sub2api`) contains fix markers:
+  `antigravity/hub/%s`, `stream_first_token_timeout`,
+  `MALFORMED_FUNCTION_CALL; please retry`,
+  `Return a valid JSON object.`,
+  `include_server_side_tool_invocations`.
+- Smoke: `GET /health` → 200; `GET /v1/models` with bad key →
+  `INVALID_API_KEY` (gateway stack live).
+- Not live-tested (needs real upstream quota): streaming SSE paths,
+  tool-call roundtrips, Codex/Claude model calls, 429 failover,
+  rollup under load. Unit + targeted integration coverage stands in.
+
+MD docs updated — stale MDs deleted, new MDs created where missing.
