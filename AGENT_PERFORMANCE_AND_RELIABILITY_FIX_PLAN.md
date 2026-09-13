@@ -187,3 +187,30 @@ MD docs updated — stale MDs deleted, new MDs created where missing.
   rollup under load. Unit + targeted integration coverage stands in.
 
 MD docs updated — stale MDs deleted, new MDs created where missing.
+
+## 6. Live Verification With Real Quota (2026-09-13)
+
+Temporary keys on Antigravity Pool + OpenAI Codex Pool, deleted after.
+Spend: ~15 micro-requests on flash-tier / small models.
+
+| # | Test | Result |
+|---|---|---|
+| #7088 | chat json_object on gemini-3.6-flash | ✅ raw JSON, no prose |
+| #7081 | (no live MALFORMED trigger observed) | ⚠️ unit-covered only |
+| #7080 | Claude mixed func+search (was 100% 400) | ✅ 200 tool_use, functions work, search dropped with server log |
+| #7080 | 3.8-tiered mixed | ✅ 200 (search dropped, functions work) |
+| #7080 | pure search / function-only | ✅ 200, no regression |
+| #6985 | thinking on 3.6-high + 3.8-tiered | ⚠️ inconclusive: upstream returns zero thought summaries with both thinkingBudget-era and thinkingLevel payloads on these accounts; fix matches issue/PR prescription and is unit-tested |
+| #6419 | gemini-3.7-flash-high | ✅ 200, no 404 (hub/ UA) |
+| #6897 | claude-opus-5 | ✅ routes as opus-5; upstream 404s (model not offered on these accounts) instead of silently serving 4.x — downgrade masquerade eliminated |
+| #7027 | Codex json_object (gpt-5.6) | ✅ 200, exact JSON, no duplication |
+| #7030/239 | migrations | ✅ 026 + 239 recorded, trigger verified lock-free in DB |
+| #5290/#3603/#5203/#6804/#6976-runtime | not triggerable on demand | ⚠️ code + unit covered |
+| #6999 | no DeepSeek/MiMo accounts in pool | ⚠️ code + unit covered |
+
+Key live discovery: v1internal rejects search+function mixing on EVERY
+tested model (2.5-flash, 3.6-high, 3.8-tiered) even with the flag, so the
+fix degrades gracefully (drop search, keep functions, warn in logs) per
+LiteLLM precedent instead of hard-400.
+
+MD docs updated — stale MDs deleted, new MDs created where missing.
