@@ -329,20 +329,31 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 	svc := &AntigravityGatewayService{}
 	tests := []struct {
 		name      string
+		model     string
 		tools     string
 		wantField bool
+		wantDrop  bool
 	}{
 		{
-			name:      "mixed server and client tools",
+			name:      "mixed server and client tools on gemini 3 keeps flag",
+			model:     "gemini-3.8-flash-tiered",
 			tools:     `[{"name":"get_weather","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]`,
 			wantField: true,
 		},
 		{
+			name:     "mixed tools on older models drop search",
+			model:    "gemini-2.5-flash",
+			tools:    `[{"name":"get_weather","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]`,
+			wantDrop: true,
+		},
+		{
 			name:  "client tools only",
+			model: "gemini-2.5-flash",
 			tools: `[{"name":"get_weather","input_schema":{"type":"object"}}]`,
 		},
 		{
 			name:  "server tools only",
+			model: "gemini-2.5-flash",
 			tools: `[{"type":"web_search_20250305","name":"web_search"}]`,
 		},
 	}
@@ -351,7 +362,7 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 		t.Run(tt.name, func(t *testing.T) {
 			claudeBody := []byte(`{"messages":[{"role":"user","content":"hello"}],"tools":` + tt.tools + `}`)
 			claudeBody = bytes.ReplaceAll(claudeBody, []byte{92}, nil)
-			body, err := svc.buildAntigravityCompatGeminiBody(context.Background(), claudeBody, nil, "project-1", "gemini-2.5-flash", claudeBody)
+			body, err := svc.buildAntigravityCompatGeminiBody(context.Background(), claudeBody, nil, "project-1", tt.model, claudeBody)
 			require.NoError(t, err)
 
 			var wrapped map[string]any
@@ -359,6 +370,18 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 			request, ok := wrapped["request"].(map[string]any)
 			require.True(t, ok)
 			toolConfig, exists := request["toolConfig"].(map[string]any)
+			if tt.wantDrop {
+				// #7080: search dropped on non-3 models; no flag, no search.
+				if exists {
+					require.NotEqual(t, true, toolConfig["includeServerSideToolInvocations"])
+				}
+				tools, _ := request["tools"].([]any)
+				for _, rawTool := range tools {
+					tool, _ := rawTool.(map[string]any)
+					require.NotContains(t, tool, "googleSearch")
+				}
+				return
+			}
 			if !tt.wantField {
 				require.False(t, exists)
 				return
@@ -396,31 +419,48 @@ func TestBuildAntigravityCompatGeminiBody_ResponseFormatJSON(t *testing.T) {
 
 func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
-	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
-	body := []byte(`{
-		"model":"claude-opus-4-6-thinking",
-		"messages":[{"role":"user","content":"hello"}],
-		"stream":true,
-		"tools":[
-			{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}},
-			{"type":"function","function":{"name":"terminal","parameters":{"type":"object","properties":{"command":{"type":"string"}}}}},
-			{"type":"web_search"},
-			{"type":"code_execution"}
-		]
-	}`)
-	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+	newBody := func(model string) []byte {
+		return []byte(`{
+			"model":"` + model + `",
+			"messages":[{"role":"user","content":"hello"}],
+			"stream":true,
+			"tools":[
+				{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}},
+				{"type":"function","function":{"name":"terminal","parameters":{"type":"object","properties":{"command":{"type":"string"}}}}},
+				{"type":"web_search"},
+				{"type":"code_execution"}
+			]
+		}`)
+	}
+	forward := func(model string) []byte {
+		upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+		svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
+		body := newBody(model)
+		c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
 
-	result, err := svc.ForwardAsChatCompletions(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
+		result, err := svc.ForwardAsChatCompletions(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.requestBodies, 1)
-	requestBody := upstream.requestBodies[0]
-	require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
-	require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
-	require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
-	require.True(t, gjson.GetBytes(requestBody, "request.tools.2.codeExecution").Exists())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Len(t, upstream.requestBodies, 1)
+		return upstream.requestBodies[0]
+	}
+
+	t.Run("gemini 3 keeps search with flag", func(t *testing.T) {
+		requestBody := forward("gemini-3.8-flash-tiered")
+		require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
+		require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
+		require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
+	})
+
+	t.Run("older models drop search keeps functions", func(t *testing.T) {
+		requestBody := forward("claude-opus-4-6-thinking")
+		// code_execution coexists with functions (flag stays); only the
+		// search builtin is dropped on non-Gemini-3 models.
+		require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
+		require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
+		require.False(t, strings.Contains(gjson.GetBytes(requestBody, "request.tools").String(), "googleSearch"))
+	})
 }
 
 func TestAntigravityCompatPreservesChatTokenLimit(t *testing.T) {

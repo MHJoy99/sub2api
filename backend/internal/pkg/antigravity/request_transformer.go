@@ -90,9 +90,15 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 
 	// 检测是否有 web_search 工具
 	hasWebSearchTool := hasWebSearchTool(claudeReq.Tools)
+	hasFunctionTools := hasFunctionToolsForSearchRouting(claudeReq.Tools)
 	requestType := "agent"
 	targetModel := mappedModel
-	if hasWebSearchTool {
+	// Pure search keeps the cheap 2.5-flash fallback. Mixed
+	// search+functions only works natively on Gemini 3+ (#7080,
+	// LiteLLM drops search tools on older models to avoid 400):
+	// keep a Gemini 3+ target, otherwise the search builtin is
+	// dropped in buildTools and functions are preserved.
+	if hasWebSearchTool && !hasFunctionTools {
 		requestType = "web_search"
 		if targetModel != webSearchFallbackModel {
 			targetModel = webSearchFallbackModel
@@ -138,7 +144,7 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	generationConfig := buildGenerationConfig(reqForConfig)
 
 	// 4. 构建 tools
-	tools := buildTools(claudeReq.Tools)
+	tools := buildToolsForModel(claudeReq.Tools, targetModel)
 
 	// 5. 构建内部请求
 	innerRequest := GeminiRequest{
@@ -801,8 +807,42 @@ func hasMixedToolInvocations(declarations []GeminiToolDeclaration) bool {
 	return hasFunc && hasBuiltin
 }
 
+// IsGemini3OrNewer reports whether a model supports native mixing of
+// built-in search tools with function calling (#7080). Mirrors LiteLLM's
+// VertexGeminiConfig._is_gemini_3_or_newer.
+func IsGemini3OrNewer(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "gemini-3") || strings.Contains(lower, "gemini-4")
+}
+
+// hasFunctionToolsForSearchRouting reports whether tools include at least
+// one client-side function declaration (non-search, non-codeexec).
+func hasFunctionToolsForSearchRouting(tools []ClaudeTool) bool {
+	for _, tool := range tools {
+		if isWebSearchTool(tool) || isCodeExecutionTool(tool) {
+			continue
+		}
+		if tool.Type == "custom" {
+			if tool.Custom == nil || tool.Custom.InputSchema == nil {
+				continue
+			}
+		}
+		if strings.TrimSpace(tool.Name) == "" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // buildTools 构建 tools
 func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
+	return buildToolsForModel(tools, "")
+}
+
+// buildToolsForModel 构建 tools；targetModel 决定 mixed search+functions
+// 在非 Gemini 3+ 模型上是否保留 search（见 #7080）。
+func buildToolsForModel(tools []ClaudeTool, targetModel string) []GeminiToolDeclaration {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -867,13 +907,17 @@ func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
 	}
 
 	var declarations []GeminiToolDeclaration
-	// #7080: when built-in search is combined with function calling,
-	// upstream requires googleSearch in the SAME tools entry as
-	// functionDeclarations (plus the toolConfig flag). Separate entries
-	// are rejected with "enable tool_config..." even when the flag is set.
-	if len(funcDecls) > 0 && hasWebSearch {
+	if len(funcDecls) > 0 {
 		declarations = append(declarations, GeminiToolDeclaration{
 			FunctionDeclarations: funcDecls,
+		})
+	}
+	// #7080: upstream only supports search+function mixing natively on
+	// Gemini 3+ (with the toolConfig flag). On older models the mix is
+	// rejected even with the flag, so drop the search builtin and keep
+	// function declarations (LiteLLM does the same to avoid the 400).
+	if hasWebSearch && (len(funcDecls) == 0 || IsGemini3OrNewer(targetModel)) {
+		declarations = append(declarations, GeminiToolDeclaration{
 			GoogleSearch: &GeminiGoogleSearch{
 				EnhancedContent: &GeminiEnhancedContent{
 					ImageSearch: &GeminiImageSearch{
@@ -882,23 +926,8 @@ func buildTools(tools []ClaudeTool) []GeminiToolDeclaration {
 				},
 			},
 		})
-	} else {
-		if len(funcDecls) > 0 {
-			declarations = append(declarations, GeminiToolDeclaration{
-				FunctionDeclarations: funcDecls,
-			})
-		}
-		if hasWebSearch {
-			declarations = append(declarations, GeminiToolDeclaration{
-				GoogleSearch: &GeminiGoogleSearch{
-					EnhancedContent: &GeminiEnhancedContent{
-						ImageSearch: &GeminiImageSearch{
-							MaxResultCount: 5,
-						},
-					},
-				},
-			})
-		}
+	} else if hasWebSearch {
+		log.Printf("[Antigravity] dropping googleSearch for non-Gemini-3 model %s: search+function mixing unsupported upstream, keeping %d function declarations", targetModel, len(funcDecls))
 	}
 	if hasCodeExecution {
 		declarations = append(declarations, GeminiToolDeclaration{

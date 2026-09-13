@@ -52,18 +52,63 @@ func TestBuildGenerationConfig_Gemini3ThinkingLevel(t *testing.T) {
 	})
 }
 
-// #7080: Claude branch must expose the snake_case tool_config envelope so
-// Antigravity accepts mixed built-in + function tools.
+// #7080: Gemini 3+ mixed search+functions keeps both tool types with the
+// toolConfig flag; on older models the search builtin is dropped and
+// function declarations preserved (upstream rejects the mix otherwise).
+func TestBuildToolsForModel_MixedSearchRouting(t *testing.T) {
+	mixed := []ClaudeTool{
+		{Name: "bash", InputSchema: map[string]any{"type": "object"}},
+		{Type: "web_search_20250305", Name: "web_search"},
+	}
+
+	t.Run("gemini 3 keeps search with flag", func(t *testing.T) {
+		decls := buildToolsForModel(mixed, "gemini-3.8-flash-tiered")
+		require.Len(t, decls, 2)
+		require.NotEmpty(t, decls[0].FunctionDeclarations)
+		require.NotNil(t, decls[1].GoogleSearch)
+		require.True(t, hasMixedToolInvocations(decls))
+	})
+
+	t.Run("older model drops search keeps functions", func(t *testing.T) {
+		decls := buildToolsForModel(mixed, "gemini-2.5-flash")
+		require.Len(t, decls, 1)
+		require.NotEmpty(t, decls[0].FunctionDeclarations)
+		require.Nil(t, decls[0].GoogleSearch)
+		require.False(t, hasMixedToolInvocations(decls))
+	})
+
+	t.Run("claude model drops search keeps functions", func(t *testing.T) {
+		decls := buildToolsForModel(mixed, "claude-sonnet-4-6")
+		require.Len(t, decls, 1)
+		require.NotEmpty(t, decls[0].FunctionDeclarations)
+	})
+
+	t.Run("pure search keeps fallback entry", func(t *testing.T) {
+		decls := buildToolsForModel([]ClaudeTool{
+			{Type: "web_search_20250305", Name: "web_search"},
+		}, "gemini-2.5-flash")
+		require.Len(t, decls, 1)
+		require.NotNil(t, decls[0].GoogleSearch)
+	})
+
+	t.Run("IsGemini3OrNewer", func(t *testing.T) {
+		require.True(t, IsGemini3OrNewer("gemini-3.8-flash-tiered"))
+		require.True(t, IsGemini3OrNewer("gemini-3.6-flash-high"))
+		require.False(t, IsGemini3OrNewer("gemini-2.5-flash"))
+		require.False(t, IsGemini3OrNewer("claude-sonnet-4-6"))
+	})
+}
+
 func TestEnsureToolConfigSnakeCaseEnvelope(t *testing.T) {
 	mixed := []ClaudeTool{
 		{Name: "bash", InputSchema: map[string]any{"type": "object"}},
 		{Type: "web_search_20250305", Name: "web_search"},
 	}
 	body, err := TransformClaudeToGeminiWithOptions(&ClaudeRequest{
-		Model:    "claude-sonnet-4-6",
+		Model:    "gemini-3.8-flash-tiered",
 		Messages: []ClaudeMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 		Tools:    mixed,
-	}, "project-1", "claude-sonnet-4-6", DefaultTransformOptions())
+	}, "project-1", "gemini-3.8-flash-tiered", DefaultTransformOptions())
 	require.NoError(t, err)
 
 	var env map[string]any
@@ -77,7 +122,9 @@ func TestEnsureToolConfigSnakeCaseEnvelope(t *testing.T) {
 	snake, ok := req["tool_config"].(map[string]any)
 	require.True(t, ok, "snake_case tool_config envelope must exist")
 	require.Equal(t, true, snake["include_server_side_tool_invocations"])
+}
 
+func TestEnsureToolConfigSnakeCaseEnvelope_EdgeCases(t *testing.T) {
 	t.Run("no tools leaves envelope untouched", func(t *testing.T) {
 		out := ensureToolConfigSnakeCaseEnvelope([]byte(`{"request":{"contents":[]}}`))
 		require.NotContains(t, string(out), "tool_config")

@@ -289,15 +289,13 @@ func TestBuildTools_PreservesWebSearchAlongsideFunctions(t *testing.T) {
 	}
 
 	result := buildTools(tools)
-	// #7080: mixed built-in + function tools share one entry so upstream
-	// accepts the combination alongside the toolConfig flag.
+	// #7080: without a Gemini 3+ target, mixed search+functions drops the
+	// search builtin (upstream rejects the mix even with the flag) and
+	// keeps function declarations.
 	require.Len(t, result, 1)
 	require.Len(t, result[0].FunctionDeclarations, 1)
 	require.Equal(t, "get_weather", result[0].FunctionDeclarations[0].Name)
-	require.NotNil(t, result[0].GoogleSearch)
-	require.NotNil(t, result[0].GoogleSearch.EnhancedContent)
-	require.NotNil(t, result[0].GoogleSearch.EnhancedContent.ImageSearch)
-	require.Equal(t, 5, result[0].GoogleSearch.EnhancedContent.ImageSearch.MaxResultCount)
+	require.Nil(t, result[0].GoogleSearch)
 }
 
 func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
@@ -574,10 +572,11 @@ func TestTransformClaudeToGeminiWithOptions_PreservesWebSearchAlongsideFunctions
 
 	var req V1InternalRequest
 	require.NoError(t, json.Unmarshal(body, &req))
+	// gemini-2.5-flash is not Gemini 3+: search dropped, functions kept.
 	require.Len(t, req.Request.Tools, 1)
 	require.Len(t, req.Request.Tools[0].FunctionDeclarations, 1)
 	require.Equal(t, "get_weather", req.Request.Tools[0].FunctionDeclarations[0].Name)
-	require.NotNil(t, req.Request.Tools[0].GoogleSearch)
+	require.Nil(t, req.Request.Tools[0].GoogleSearch)
 }
 
 func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
@@ -611,12 +610,33 @@ func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
 	}
 
 	t.Run("mixed builtin and function tools enable server-side tool invocations", func(t *testing.T) {
-		req, raw := transform(t, []ClaudeTool{functionTool, webSearchTool})
+		body, err := TransformClaudeToGeminiWithOptions(&ClaudeRequest{
+			Model: "gemini-3.8-flash-tiered",
+			Messages: []ClaudeMessage{
+				{
+					Role:    "user",
+					Content: json.RawMessage(`[{"type":"text","text":"hello"}]`),
+				},
+			},
+			Tools: []ClaudeTool{functionTool, webSearchTool},
+		}, "project-1", "gemini-3.8-flash-tiered", DefaultTransformOptions())
+		require.NoError(t, err)
+
+		var req3 V1InternalRequest
+		require.NoError(t, json.Unmarshal(body, &req3))
+		require.NotNil(t, req3.Request.ToolConfig)
+		require.NotNil(t, req3.Request.ToolConfig.IncludeServerSideToolInvocations)
+		require.True(t, *req3.Request.ToolConfig.IncludeServerSideToolInvocations)
+		require.Contains(t, string(body), `"includeServerSideToolInvocations":true`)
+	})
+
+	t.Run("mixed tools on older models drop search instead of flagging", func(t *testing.T) {
+		req, _ := transform(t, []ClaudeTool{functionTool, webSearchTool})
 
 		require.NotNil(t, req.Request.ToolConfig)
-		require.NotNil(t, req.Request.ToolConfig.IncludeServerSideToolInvocations)
-		require.True(t, *req.Request.ToolConfig.IncludeServerSideToolInvocations)
-		require.Contains(t, raw, `"includeServerSideToolInvocations":true`)
+		require.Nil(t, req.Request.ToolConfig.IncludeServerSideToolInvocations)
+		require.Len(t, req.Request.Tools, 1)
+		require.NotEmpty(t, req.Request.Tools[0].FunctionDeclarations)
 	})
 
 	t.Run("function tools only leave the flag unset", func(t *testing.T) {

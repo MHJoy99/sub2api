@@ -421,7 +421,7 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if err != nil {
 			return nil, err
 		}
-		body, err = enableMixedGeminiToolInvocations(body)
+		body, err = enableMixedGeminiToolInvocationsForModel(body, mappedModel)
 		if err != nil {
 			return nil, err
 		}
@@ -478,6 +478,14 @@ func ensureGeminiResponseFormatJSON(body []byte, originalBody []byte) []byte {
 }
 
 func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
+	return enableMixedGeminiToolInvocationsForModel(body, "")
+}
+
+// enableMixedGeminiToolInvocationsForModel sets the mixed-invocation flag
+// when built-in search coexists with function declarations. On non-Gemini-3
+// models upstream rejects the mix even with the flag (#7080), so the search
+// builtin entries are dropped and function declarations preserved.
+func enableMixedGeminiToolInvocationsForModel(body []byte, mappedModel string) ([]byte, error) {
 	var request map[string]any
 	if err := json.Unmarshal(body, &request); err != nil {
 		return nil, err
@@ -498,6 +506,29 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 	}
 	if !hasGoogleSearch || !hasFunctionDeclarations {
 		return body, nil
+	}
+
+	if mappedModel != "" && !antigravity.IsGemini3OrNewer(mappedModel) {
+		kept := make([]any, 0, 2)
+		if tools, ok := request["tools"].([]any); ok {
+			for _, rawTool := range tools {
+				tool, ok := rawTool.(map[string]any)
+				if !ok {
+					kept = append(kept, rawTool)
+					continue
+				}
+				if _, hasSearch := tool["googleSearch"]; hasSearch {
+					continue
+				}
+				kept = append(kept, rawTool)
+			}
+		}
+		request["tools"] = kept
+		out, err := json.Marshal(request)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 
 	toolConfig, _ := request["toolConfig"].(map[string]any)
