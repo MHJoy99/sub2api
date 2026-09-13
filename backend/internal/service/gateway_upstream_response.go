@@ -775,12 +775,15 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
-	// #5290: first-token watchdog. Default 60s when unset; 0 disables.
+	// #5290: first-token watchdog. viper default is 60s; an explicit
+	// 0 (or negative) value disables it.
 	firstTokenTimeout := 60 * time.Second
-	if s.cfg != nil && s.cfg.Gateway.StreamFirstTokenTimeout > 0 {
-		firstTokenTimeout = time.Duration(s.cfg.Gateway.StreamFirstTokenTimeout) * time.Second
-	} else if s.cfg != nil && s.cfg.Gateway.StreamFirstTokenTimeout < 0 {
-		firstTokenTimeout = 0
+	if s.cfg != nil {
+		if s.cfg.Gateway.StreamFirstTokenTimeout <= 0 {
+			firstTokenTimeout = 0
+		} else {
+			firstTokenTimeout = time.Duration(s.cfg.Gateway.StreamFirstTokenTimeout) * time.Second
+		}
 	}
 	var firstTokenTimer *time.Timer
 	if firstTokenTimeout > 0 {
