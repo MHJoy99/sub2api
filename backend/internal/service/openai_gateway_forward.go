@@ -1509,6 +1509,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
 	}
+	// #3603: force identity encoding on streaming upstreams so SSE
+	// reasoning deltas are not buffered by gzip/zstd intermediaries.
+	if isStream {
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)

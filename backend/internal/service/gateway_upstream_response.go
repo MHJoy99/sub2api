@@ -775,6 +775,22 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
+	// #5290: first-token watchdog. Default 60s when unset; 0 disables.
+	firstTokenTimeout := 60 * time.Second
+	if s.cfg != nil && s.cfg.Gateway.StreamFirstTokenTimeout > 0 {
+		firstTokenTimeout = time.Duration(s.cfg.Gateway.StreamFirstTokenTimeout) * time.Second
+	} else if s.cfg != nil && s.cfg.Gateway.StreamFirstTokenTimeout < 0 {
+		firstTokenTimeout = 0
+	}
+	var firstTokenTimer *time.Timer
+	if firstTokenTimeout > 0 {
+		firstTokenTimer = time.NewTimer(firstTokenTimeout)
+		defer firstTokenTimer.Stop()
+	}
+	var firstTokenCh <-chan time.Time
+	if firstTokenTimer != nil {
+		firstTokenCh = firstTokenTimer.C
+	}
 	// 仅监控上游数据间隔超时，避免下游写入阻塞导致误判
 	var intervalTicker *time.Ticker
 	if streamInterval > 0 {
@@ -1150,6 +1166,19 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			flusher.Flush()
 			lastDataAt = time.Now()
 			resetKeepaliveTimer()
+
+		case <-firstTokenCh:
+			// #5290: upstream accepted the stream but produced no token.
+			// Fail fast with a retryable error so the caller can fail
+			// over instead of hanging until the client gives up.
+			if firstTokenMs != nil {
+				continue
+			}
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+			}
+			sendErrorEvent("first_token_timeout", fmt.Sprintf("upstream produced no token within %s", firstTokenTimeout))
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream first token timeout after %s", firstTokenTimeout)
 		}
 	}
 

@@ -104,8 +104,9 @@ const AntigravityGemini31ProAgentModel = "gemini-pro-agent"
 // 与前端 useModelWhitelist.ts 中的 antigravityDefaultMappings 保持一致
 var DefaultAntigravityModelMapping = map[string]string{
 	// Claude 白名单
-	"claude-opus-5":              "claude-opus-4-8",          // Claude 5 官方映射透传
-	"claude-sonnet-5":            "claude-sonnet-4-6",        // Claude 5 官方映射透传
+	// #6897: v5 models must route to themselves, not downgraded 4.x.
+	"claude-opus-5":              "claude-opus-5",
+	"claude-sonnet-5":            "claude-sonnet-5",
 	"claude-fable-5-1":           "claude-fable-5-1",         // 官方模型
 	"claude-fable-5":             "claude-fable-5",           // 官方模型
 	"claude-opus-4-8":            "claude-opus-4-8",          // 官方模型

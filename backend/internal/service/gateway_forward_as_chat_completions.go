@@ -418,7 +418,12 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent) bool {
-		if event == nil || event.Type == "ping" || event.Type == "error" {
+		if event == nil {
+			return false
+		}
+		// #5203: drop Anthropic keepalive pings before OpenAI conversion.
+		// Error events must NOT be dropped — they carry upstream failures.
+		if event.Type == "ping" {
 			return false
 		}
 		if firstChunk {

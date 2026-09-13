@@ -195,6 +195,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。
 	account.ApplyHeaderOverrides(req.Header)
+	// #3603: SSE + gzip/zstd causes upstream reverse proxies to buffer
+	// reasoning frames for 10-60s. Force identity on streaming upstreams
+	// so deltas flush immediately.
+	if reqStream {
+		setHeaderRaw(req.Header, "Accept-Encoding", "identity")
+	}
 	// OpenCode Go 原生 messages 端点（/zen/go/v1）：调用方值优先，缺失合成。
 	// 作用域限定官方 origin，非 Go 上游 no-op。
 	applyOpenCodeSessionHeader(c, account, targetURL, req.Header)

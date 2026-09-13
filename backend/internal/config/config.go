@@ -1049,6 +1049,10 @@ type GatewayConfig struct {
 
 	// StreamDataIntervalTimeout: 流数据间隔超时（秒），0表示禁用
 	StreamDataIntervalTimeout int `mapstructure:"stream_data_interval_timeout"`
+	// StreamFirstTokenTimeout: 首 token 超时（秒），0表示禁用，默认 60。
+	// #5290: 上游接受流式请求后迟迟不产生首 token 时，中止并触发 failover，
+	// 避免客户端挂起 5-13 分钟。
+	StreamFirstTokenTimeout int `mapstructure:"stream_first_token_timeout"`
 	// StreamKeepaliveInterval: 流式 keepalive 间隔（秒），0表示禁用
 	StreamKeepaliveInterval int `mapstructure:"stream_keepalive_interval"`
 	// ImageStreamDataIntervalTimeout: 图片流数据间隔超时（秒），0表示禁用

@@ -251,7 +251,7 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	if request.chatRequest != nil && strings.HasPrefix(strings.ToLower(mappedModel), "gemini-") {
 		geminiBody, err = s.buildAntigravityAudioGeminiBody(ctx, request.chatRequest, projectID, mappedModel)
 	} else {
-		geminiBody, err = s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
+		geminiBody, err = s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel, request.originalBody)
 	}
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
@@ -414,6 +414,7 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 	claudeRequest *antigravity.ClaudeRequest,
 	projectID string,
 	mappedModel string,
+	originalBody []byte,
 ) ([]byte, error) {
 	if strings.HasPrefix(strings.ToLower(mappedModel), "gemini-") {
 		body, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
@@ -432,7 +433,10 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
 			body = cleaned
 		}
-		body = ensureGeminiResponseFormatJSON(body, claudeBody)
+		// #7088: response_format lives on the ORIGINAL inbound body
+		// (Chat Completions / Responses). claudeBody is Anthropic-schema
+		// and never carries it, so inspect originalBody here.
+		body = ensureGeminiResponseFormatJSON(body, originalBody)
 		return s.wrapV1InternalRequest(projectID, mappedModel, body)
 	}
 
@@ -441,8 +445,19 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 	return antigravity.TransformClaudeToGeminiWithOptions(claudeRequest, projectID, mappedModel, options)
 }
 
-func ensureGeminiResponseFormatJSON(body []byte, claudeBody []byte) []byte {
-	if !gjson.GetBytes(claudeBody, "response_format").Exists() && !bytes.Contains(claudeBody, []byte(`"json_object"`)) {
+func ensureGeminiResponseFormatJSON(body []byte, originalBody []byte) []byte {
+	if len(originalBody) == 0 {
+		return body
+	}
+	// Chat Completions: response_format.type json_object/json_schema.
+	// Responses: text.format.type json_object/json_schema.
+	jsonRequested := gjson.GetBytes(originalBody, "response_format.type").String() == "json_object" ||
+		gjson.GetBytes(originalBody, "response_format.type").String() == "json_schema" ||
+		gjson.GetBytes(originalBody, "text.format.type").String() == "json_object" ||
+		gjson.GetBytes(originalBody, "text.format.type").String() == "json_schema" ||
+		bytes.Contains(originalBody, []byte(`"json_object"`)) ||
+		bytes.Contains(originalBody, []byte(`"json_schema"`))
+	if !jsonRequested {
 		return body
 	}
 	var req map[string]any
@@ -491,6 +506,10 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 		request["toolConfig"] = toolConfig
 	}
 	toolConfig["includeServerSideToolInvocations"] = true
+	// #7080: also emit snake_case for Claude-model upstreams that parse
+	// the Anthropic envelope, and duplicate the envelope itself.
+	toolConfig["include_server_side_tool_invocations"] = true
+	request["tool_config"] = toolConfig
 	return json.Marshal(request)
 }
 

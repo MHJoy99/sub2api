@@ -529,18 +529,21 @@ func (p *StreamingProcessor) emitFinish(finishReason string) []byte {
 	} else if finishReason == "MAX_TOKENS" {
 		stopReason = "max_tokens"
 	} else if finishReason == "MALFORMED_FUNCTION_CALL" {
-		// If Gemini failed to parse function arguments, emit explicit tool_use error rather than empty success
+		// #7081: upstream produced thoughtSignature-only content with no
+		// text/tool call. Emit a visible retryable text block so clients
+		// never receive an empty HTTP 200. Keep stop_reason valid
+		// (end_turn) — "error" is not a valid Anthropic stop_reason.
 		if p.blockType == BlockTypeNone {
 			_, _ = result.Write(p.startBlock(BlockTypeText, map[string]any{
 				"type": "text",
 				"text": "",
 			}))
 			_, _ = result.Write(p.emitDelta("text_delta", map[string]any{
-				"text": "Upstream returned MALFORMED_FUNCTION_CALL",
+				"text": "Upstream returned MALFORMED_FUNCTION_CALL; please retry the turn with repaired tool arguments",
 			}))
 			_, _ = result.Write(p.endBlock())
 		}
-		stopReason = "error"
+		stopReason = "end_turn"
 	}
 
 	usage := ClaudeUsage{

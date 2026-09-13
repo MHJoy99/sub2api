@@ -191,7 +191,40 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 		Request:     innerRequest,
 	}
 
-	return json.Marshal(v1Req)
+	raw, err := json.Marshal(v1Req)
+	if err != nil {
+		return nil, err
+	}
+	// #7080: Claude models via Antigravity reject camelCase-only
+	// toolConfig envelope. Duplicate request.toolConfig as
+	// request.tool_config so both protobuf JSON parsers accept the
+	// include_server_side_tool_invocations flag.
+	return ensureToolConfigSnakeCaseEnvelope(raw), nil
+}
+
+// ensureToolConfigSnakeCaseEnvelope duplicates request.toolConfig as
+// request.tool_config in raw v1internal JSON. No-op when toolConfig absent.
+func ensureToolConfigSnakeCaseEnvelope(raw []byte) []byte {
+	var env map[string]any
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return raw
+	}
+	req, _ := env["request"].(map[string]any)
+	if req == nil {
+		return raw
+	}
+	toolCfg, _ := req["toolConfig"].(map[string]any)
+	if toolCfg == nil {
+		return raw
+	}
+	if _, exists := req["tool_config"]; !exists {
+		req["tool_config"] = toolCfg
+	}
+	out, err := json.Marshal(env)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // antigravityIdentity Antigravity identity 提示词
@@ -669,13 +702,35 @@ func buildGenerationConfig(req *ClaudeRequest) *GeminiGenerationConfig {
 			}
 		}
 		// Gemini 3.x models require thinkingLevel instead of thinkingBudget
+		// (#6985, #6419, #3214). Upstream returns zero thought summaries
+		// when thinkingBudget is sent without thinkingLevel.
 		lowerModel := strings.ToLower(req.Model)
-		if strings.Contains(lowerModel, "gemini-3.") || strings.Contains(lowerModel, "gemini-3-") {
+		if strings.Contains(lowerModel, "gemini-3.") || strings.Contains(lowerModel, "gemini-3-") || strings.Contains(lowerModel, "gemini-3") {
 			level := "high"
-			if strings.HasSuffix(lowerModel, "-low") {
+			switch {
+			case strings.HasSuffix(lowerModel, "-low"):
 				level = "low"
-			} else if strings.HasSuffix(lowerModel, "-medium") {
+			case strings.HasSuffix(lowerModel, "-medium"):
 				level = "medium"
+			case strings.HasSuffix(lowerModel, "-high") || strings.HasSuffix(lowerModel, "-tiered"):
+				// Explicit high tier or default tiered model: keep high,
+				// but allow small explicit budgets to downgrade.
+				if budget > 0 && budget <= 4096 {
+					level = "low"
+				} else if budget > 0 && budget <= 12288 {
+					level = "medium"
+				} else {
+					level = "high"
+				}
+			default:
+				// Bare model ID without tier suffix: derive from budget.
+				if budget > 0 && budget <= 4096 {
+					level = "low"
+				} else if budget > 0 && budget <= 12288 {
+					level = "medium"
+				} else {
+					level = "high"
+				}
 			}
 			config.ThinkingConfig.ThinkingLevel = level
 			config.ThinkingConfig.ThinkingBudget = 0
