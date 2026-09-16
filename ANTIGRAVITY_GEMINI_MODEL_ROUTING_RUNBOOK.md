@@ -378,3 +378,38 @@ fallback (re-based onto upstream's #6581 session plumbing). Our three
 Verified in trial worktree: `go build ./...` clean, `service` (27 PASS),
 `antigravity` + `domain` + `handler` suites green. Pushed `mhjoy/ours`,
 deployed, `/v1/models` re-checked post-deploy.
+
+## False-429 fix — 2026-09-16 (gemini-3.8 as sub-agent)
+
+Symptom: Codex heavy turns on `gemini-3.8-flash-high/-tiered` (55-61 tools,
+~266KB body, full AGENTS.md context) failed as 429 on all 5 Antigravity
+accounts in a row (15 upstream hits: 3 retries x 5 accounts, ~30s), while
+tiny prompts on the same model returned 200 and Muse Spark (separate OpenAI
+pool) stayed green. Failover cannot help because every account rejects the
+same prompt identically.
+
+Root cause: not real quota. Our v1internal envelope sent
+`requestType: "agent"` with `userAgent: "antigravity"`. Google's Cloud Code
+Assist gateway applies an instruction-hierarchy filter on `systemInstruction`
+when `requestType: "agent"` is present and answers convention-heavy prompts
+(RFC 2119 / `<system-conventions>` / large AGENTS.md sub-agent context) with
+false `429 RESOURCE_EXHAUSTED`. Matches upstream reports oh-my-pi #11883
+(fix PR #11884: omit `requestType`) and Aether PR #818 (same omission,
+bisected against `daily-cloudcode-pa.googleapis.com`); the official
+Antigravity client sends `userAgent` only, no `requestType`.
+
+Fix (2 files, deployed 2026-09-16, image healthy):
+- `backend/internal/pkg/antigravity/request_transformer.go:94-103`:
+  `requestType := ""` (was `"agent"`); `omitempty` drops the field. Pure
+  `web_search` keeps its fallback envelope.
+- `backend/internal/service/antigravity_gateway_service.go:621-631`
+  (`wrapV1InternalRequest`, the Codex `/v1/responses` path): removed
+  `"requestType": "agent"` from the envelope map.
+
+Verification (live, post-deploy, account 3 served all, zero failovers):
+- `go test ./internal/pkg/antigravity/ -run
+  "TestTransformClaudeToGemini|AgentFixup|IsGemini3"` green; `TestUnwrapV1InternalResponse` green.
+- Heavy sub-agent scale: AGENTS.md instructions + 60 tools (~130KB) on
+  `-high` and `-tiered` -> 200; 5x parallel fan-out -> 5x 200, no 429.
+- Oversize trigger shape: RFC 2119 + AGENTS.md x9 + 58 tools (358KB, larger
+  than the 266KB failure) -> 200 in ~4.7s.

@@ -91,7 +91,13 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 	// 检测是否有 web_search 工具
 	hasWebSearchTool := hasWebSearchTool(claudeReq.Tools)
 	hasFunctionTools := hasFunctionToolsForSearchRouting(claudeReq.Tools)
-	requestType := "agent"
+	// False-429 fix (oh-my-pi #11883/#11884): Google Cloud Code Assist returns
+	// false 429 RESOURCE_EXHAUSTED when requestType:"agent" is combined with
+	// convention-heavy system prompts (e.g. RFC 2119 / <system-conventions> /
+	// large AGENTS.md sub-agent context). The official Antigravity client omits
+	// requestType, so omit it here too (omitempty drops it). Pure web_search
+	// keeps its cheap fallback envelope below.
+	requestType := ""
 	targetModel := mappedModel
 	// Pure search keeps the cheap 2.5-flash fallback. Mixed
 	// search+functions only works natively on Gemini 3+ (#7080,

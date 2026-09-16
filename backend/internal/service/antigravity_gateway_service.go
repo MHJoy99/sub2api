@@ -621,10 +621,13 @@ func (s *AntigravityGatewayService) wrapV1InternalRequest(projectID, model strin
 		"project":     projectID,
 		"requestId":   "agent-" + uuid.New().String(),
 		"userAgent":   "antigravity", // 固定值，与官方客户端一致
-		"requestType": "agent",
 		"model":       model,
 		"request":     request,
 	}
+	// False-429 fix (oh-my-pi #11883/#11884): omit requestType. Google returns
+	// false 429 RESOURCE_EXHAUSTED when requestType:"agent" meets
+	// convention-heavy system prompts (Codex sub-agent AGENTS.md context).
+	// The official Antigravity client sends userAgent only, no requestType.
 
 	return json.Marshal(wrapped)
 }
