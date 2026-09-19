@@ -433,6 +433,10 @@ func (s *AntigravityGatewayService) buildAntigravityCompatGeminiBody(
 		if cleaned, cleanErr := cleanGeminiRequest(body); cleanErr == nil {
 			body = cleaned
 		}
+		// #gemini-3-thinking: Normalize thinkingConfig for Gemini 3.x models
+		if normalized, normErr := normalizeGeminiThinkingConfig(body, mappedModel, originalBody); normErr == nil {
+			body = normalized
+		}
 		// #7088: response_format lives on the ORIGINAL inbound body
 		// (Chat Completions / Responses). claudeBody is Anthropic-schema
 		// and never carries it, so inspect originalBody here.

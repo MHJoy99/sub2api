@@ -891,3 +891,87 @@ func TestAntigravityCompatKeepaliveAfterFirstEvent(t *testing.T) {
 	require.Contains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
 	require.NoError(t, reader.Close())
 }
+func TestAntigravityCompat_Gemini3ThinkingLevel_ThroughPipeline(t *testing.T) {
+	svc := &AntigravityGatewayService{}
+	tests := []struct {
+		name         string
+		model        string
+		originalBody []byte
+		wantLevel    string
+	}{
+		{
+			name:         "chat completions reasoning_effort high",
+			model:        "gemini-3.8-flash-tiered",
+			originalBody: []byte(`{"model":"gemini-3.8-flash-tiered","reasoning_effort":"high","messages":[{"role":"user","content":"hi"}]}`),
+			wantLevel:    "high",
+		},
+		{
+			name:         "responses reasoning.effort xhigh",
+			model:        "gemini-3.8-flash-tiered",
+			originalBody: []byte(`{"model":"gemini-3.8-flash-tiered","reasoning":{"effort":"xhigh"},"input":[{"type":"message","role":"user","content":"hi"}]}`),
+			wantLevel:    "high",
+		},
+		{
+			name:         "responses reasoning.effort max",
+			model:        "gemini-3.8-flash-tiered",
+			originalBody: []byte(`{"model":"gemini-3.8-flash-tiered","reasoning":{"effort":"max"},"input":[{"type":"message","role":"user","content":"hi"}]}`),
+			wantLevel:    "high",
+		},
+		{
+			name:         "responses reasoning.effort low",
+			model:        "gemini-3.8-flash-tiered",
+			originalBody: []byte(`{"model":"gemini-3.8-flash-tiered","reasoning":{"effort":"low"},"input":[{"type":"message","role":"user","content":"hi"}]}`),
+			wantLevel:    "low",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Simulate converting through ResponsesToAnthropicRequest
+			claudeBody := []byte(`{"model":"` + tc.model + `","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":10240},"messages":[{"role":"user","content":"hi"}]}`)
+			body, err := svc.buildAntigravityCompatGeminiBody(context.Background(), claudeBody, nil, "project-1", tc.model, tc.originalBody)
+			require.NoError(t, err)
+
+			var wrapped struct {
+				Request struct {
+					GenerationConfig struct {
+						ThinkingConfig struct {
+							IncludeThoughts bool   `json:"includeThoughts"`
+							ThinkingLevel   string `json:"thinkingLevel"`
+							ThinkingBudget  *int   `json:"thinkingBudget"`
+						} `json:"thinkingConfig"`
+					} `json:"generationConfig"`
+				} `json:"request"`
+			}
+			require.NoError(t, json.Unmarshal(body, &wrapped))
+			tcResult := wrapped.Request.GenerationConfig.ThinkingConfig
+			require.True(t, tcResult.IncludeThoughts)
+			require.Equal(t, tc.wantLevel, tcResult.ThinkingLevel)
+			require.Nil(t, tcResult.ThinkingBudget)
+		})
+	}
+
+	t.Run("gemini 2.5 retains numeric budget", func(t *testing.T) {
+		claudeBody := []byte(`{"model":"gemini-2.5-flash","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":4096},"messages":[{"role":"user","content":"hi"}]}`)
+		body, err := svc.buildAntigravityCompatGeminiBody(context.Background(), claudeBody, nil, "project-1", "gemini-2.5-flash", []byte(`{"model":"gemini-2.5-flash"}`))
+		require.NoError(t, err)
+
+		var wrapped struct {
+			Request struct {
+				GenerationConfig struct {
+					ThinkingConfig struct {
+						IncludeThoughts bool   `json:"includeThoughts"`
+						ThinkingLevel   string `json:"thinkingLevel"`
+						ThinkingBudget  *int   `json:"thinkingBudget"`
+					} `json:"thinkingConfig"`
+				} `json:"generationConfig"`
+			} `json:"request"`
+		}
+		require.NoError(t, json.Unmarshal(body, &wrapped))
+		tcResult := wrapped.Request.GenerationConfig.ThinkingConfig
+		require.True(t, tcResult.IncludeThoughts)
+		require.Empty(t, tcResult.ThinkingLevel)
+		require.NotNil(t, tcResult.ThinkingBudget)
+		require.Equal(t, 4096, *tcResult.ThinkingBudget)
+	})
+}

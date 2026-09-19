@@ -92,6 +92,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
+	if normalized, normErr := normalizeGeminiThinkingConfig(geminiReq, mappedModel, originalChatBody); normErr == nil {
+		geminiReq = normalized
+	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
 
 	proxyURL := ""
