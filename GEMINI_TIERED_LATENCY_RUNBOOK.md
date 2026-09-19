@@ -153,3 +153,12 @@ request-shape errors increase.
 
 No production deployment or account/database mutation is part of the planning
 work recorded here.
+
+## Pre-Rollout Acceptance Summary (2026-09-19)
+
+- **Test Verification**:
+  - `pkg/httputil`: `TestRequestBodyReadMetrics_IdentityAndCompressed`, limit boundaries, streaming chunk readers, and large body benchmarks all PASS.
+  - `server/middleware`: `TestLogger_AccessLogIncludesRequestBodyMetrics` confirms wire bytes, decompressed bytes, wire read ms, and decompression ms are output in access logs without payload leakage.
+  - `service`: `TestNormalizeGeminiThinkingConfig` and `TestAntigravityCompat_Gemini3ThinkingLevel_ThroughPipeline` verify that `high`, `xhigh`, and `max` produce `thinkingLevel: "high"`, remove `thinkingBudget`, retain `includeThoughts: true`, and leave Gemini 2.5 numeric budgets intact.
+  - `server/routes`: `TestGatewayRoutes_CompressedBodyDecodedEquivalence` verifies byte-for-byte identical decoding across identity, gzip, and zstd streams.
+- **Go/No-Go Decision**: GO for client-side compression rollout. The gateway is proven ready to transparently ingest compressed requests and safely map maximum thinking effort to Gemini 3.x.
