@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
@@ -99,5 +100,64 @@ func TestGatewayDecompressionLimitAppliesToEarlyReaders(t *testing.T) {
 			require.Contains(t, recorder.Body.String(), "too large")
 			require.False(t, called)
 		})
+	}
+}
+
+func TestGatewayRoutes_CompressedBodyDecodedEquivalence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+
+	var lastReceivedBody []byte
+	r.POST("/test/gateway/decompress", func(c *gin.Context) {
+		body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+		if err != nil {
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		lastReceivedBody = body
+		c.Status(http.StatusOK)
+	})
+
+	originalJSON := []byte(`{"model":"gemini-3.8-flash-tiered","messages":[{"role":"user","content":"hello world with compression"}]}`)
+
+	// 1. Identity
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/test/gateway/decompress", bytes.NewReader(originalJSON))
+		req.ContentLength = int64(len(originalJSON))
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, originalJSON, lastReceivedBody)
+	}
+
+	// 2. Gzip
+	{
+		var gzBuf bytes.Buffer
+		gw := gzip.NewWriter(&gzBuf)
+		_, _ = gw.Write(originalJSON)
+		_ = gw.Close()
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/test/gateway/decompress", bytes.NewReader(gzBuf.Bytes()))
+		req.Header.Set("Content-Encoding", "gzip")
+		req.ContentLength = int64(gzBuf.Len())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, originalJSON, lastReceivedBody)
+	}
+
+	// 3. Zstd
+	{
+		zw, _ := zstd.NewWriter(nil)
+		zstdBytes := zw.EncodeAll(originalJSON, nil)
+		_ = zw.Close()
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/test/gateway/decompress", bytes.NewReader(zstdBytes))
+		req.Header.Set("Content-Encoding", "zstd")
+		req.ContentLength = int64(len(zstdBytes))
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, originalJSON, lastReceivedBody)
 	}
 }

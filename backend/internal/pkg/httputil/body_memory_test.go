@@ -2,12 +2,15 @@ package httputil
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"testing"
 	"testing/iotest"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 type bodyReaderOnly struct{ io.Reader }
@@ -64,4 +67,78 @@ func BenchmarkReadLargeBody(b *testing.B) {
 			}
 		})
 	}
+
+	// 3.5 MB realistic JSON conversation history payload
+	targetSize := int(3.5 * 1024 * 1024)
+	pattern := []byte(`{"role":"user","content":"repeat conversation context for testing payload ingress speed"}`)
+	repeatCount := targetSize / len(pattern)
+	var rawJSONBuf bytes.Buffer
+	rawJSONBuf.WriteString(`{"model":"gemini-3.8-flash-tiered","messages":[`)
+	for i := 0; i < repeatCount; i++ {
+		if i > 0 {
+			rawJSONBuf.WriteByte(',')
+		}
+		rawJSONBuf.Write(pattern)
+	}
+	rawJSONBuf.WriteString(`]}`)
+	rawJSON := rawJSONBuf.Bytes()
+
+	// Gzip pre-compression
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	_, _ = gw.Write(rawJSON)
+	_ = gw.Close()
+	gzBytes := gzBuf.Bytes()
+
+	// Zstd pre-compression
+	zstdWriter, _ := zstd.NewWriter(nil)
+	zstdBytes := zstdWriter.EncodeAll(rawJSON, nil)
+	_ = zstdWriter.Close()
+
+	b.Run("3.5MB_identity", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(rawJSON)))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req := &http.Request{Body: io.NopCloser(bytes.NewReader(rawJSON)), ContentLength: int64(len(rawJSON)), Header: make(http.Header)}
+			got, err := ReadRequestBodyWithPrealloc(req)
+			if err != nil || len(got) != len(rawJSON) {
+				b.Fatalf("failed read: %v", err)
+			}
+		}
+	})
+
+	b.Run("3.5MB_gzip", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(rawJSON)))
+		b.ReportMetric(float64(len(gzBytes)), "wire-bytes/op")
+		b.ReportMetric(float64(len(rawJSON)), "decoded-bytes/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hdr := make(http.Header)
+			hdr.Set("Content-Encoding", "gzip")
+			req := &http.Request{Body: io.NopCloser(bytes.NewReader(gzBytes)), ContentLength: int64(len(gzBytes)), Header: hdr}
+			got, err := ReadRequestBodyWithPrealloc(req)
+			if err != nil || len(got) != len(rawJSON) {
+				b.Fatalf("failed read: %v", err)
+			}
+		}
+	})
+
+	b.Run("3.5MB_zstd", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(rawJSON)))
+		b.ReportMetric(float64(len(zstdBytes)), "wire-bytes/op")
+		b.ReportMetric(float64(len(rawJSON)), "decoded-bytes/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hdr := make(http.Header)
+			hdr.Set("Content-Encoding", "zstd")
+			req := &http.Request{Body: io.NopCloser(bytes.NewReader(zstdBytes)), ContentLength: int64(len(zstdBytes)), Header: hdr}
+			got, err := ReadRequestBodyWithPrealloc(req)
+			if err != nil || len(got) != len(rawJSON) {
+				b.Fatalf("failed read: %v", err)
+			}
+		}
+	})
 }
