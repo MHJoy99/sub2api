@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -21,6 +23,65 @@ const (
 	// DefaultMaxDecompressedBodySize 保留未配置请求的 64 MiB 解压保护。
 	DefaultMaxDecompressedBodySize int64 = 64 << 20
 )
+
+type RequestBodyReadMetricsSnapshot struct {
+	ContentEncoding   string
+	DeclaredWireBytes int64
+	ActualWireBytes   int64
+	DecompressedBytes int64
+	WireReadDuration  time.Duration
+	DecodeDuration    time.Duration
+}
+
+type requestBodyMetricsCollector struct {
+	mu       sync.Mutex
+	recorded bool
+	snapshot RequestBodyReadMetricsSnapshot
+}
+
+func (c *requestBodyMetricsCollector) record(snap RequestBodyReadMetricsSnapshot) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.recorded {
+		c.snapshot = snap
+		c.recorded = true
+	}
+}
+
+func (c *requestBodyMetricsCollector) getSnapshot() (RequestBodyReadMetricsSnapshot, bool) {
+	if c == nil {
+		return RequestBodyReadMetricsSnapshot{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.snapshot, c.recorded
+}
+
+type requestBodyMetricsKey struct{}
+
+func WithRequestBodyReadMetrics(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Value(requestBodyMetricsKey{}).(*requestBodyMetricsCollector); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, requestBodyMetricsKey{}, &requestBodyMetricsCollector{})
+}
+
+func RequestBodyReadMetricsFromContext(ctx context.Context) (RequestBodyReadMetricsSnapshot, bool) {
+	if ctx == nil {
+		return RequestBodyReadMetricsSnapshot{}, false
+	}
+	collector, ok := ctx.Value(requestBodyMetricsKey{}).(*requestBodyMetricsCollector)
+	if !ok || collector == nil {
+		return RequestBodyReadMetricsSnapshot{}, false
+	}
+	return collector.getSnapshot()
+}
 
 type maxDecompressedBodySizeKey struct{}
 
@@ -89,6 +150,13 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		return preread.Bytes(), nil
 	}
 
+	var collector *requestBodyMetricsCollector
+	if req.Context() != nil {
+		collector, _ = req.Context().Value(requestBodyMetricsKey{}).(*requestBodyMetricsCollector)
+	}
+	declaredWireBytes := req.ContentLength
+	encHeader := req.Header.Get("Content-Encoding")
+
 	capHint := requestBodyReadInitCap
 	if req.ContentLength > 0 {
 		switch {
@@ -101,19 +169,44 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		}
 	}
 
+	wireReadStart := time.Now()
 	raw, err := readRequestBodyChunks(req.Body, capHint, req.ContentLength)
+	wireReadDuration := time.Since(wireReadStart)
 	if err != nil {
 		return nil, err
 	}
 
-	enc := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
+	enc := strings.ToLower(strings.TrimSpace(encHeader))
 	if enc == "" || enc == "identity" {
+		if collector != nil {
+			collector.record(RequestBodyReadMetricsSnapshot{
+				ContentEncoding:   "identity",
+				DeclaredWireBytes: declaredWireBytes,
+				ActualWireBytes:   int64(len(raw)),
+				DecompressedBytes: int64(len(raw)),
+				WireReadDuration:  wireReadDuration,
+				DecodeDuration:    0,
+			})
+		}
 		return raw, nil
 	}
 
+	decodeStart := time.Now()
 	decoded, err := decompressRequestBody(enc, raw, requestMaxDecompressedBodySize(req))
+	decodeDuration := time.Since(decodeStart)
 	if err != nil {
 		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
+	}
+
+	if collector != nil {
+		collector.record(RequestBodyReadMetricsSnapshot{
+			ContentEncoding:   enc,
+			DeclaredWireBytes: declaredWireBytes,
+			ActualWireBytes:   int64(len(raw)),
+			DecompressedBytes: int64(len(decoded)),
+			WireReadDuration:  wireReadDuration,
+			DecodeDuration:    decodeDuration,
+		})
 	}
 
 	req.Header.Del("Content-Encoding")

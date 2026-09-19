@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,10 @@ import (
 // Logger 请求日志中间件
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request != nil {
+			c.Request = c.Request.WithContext(httputil.WithRequestBodyReadMetrics(c.Request.Context()))
+		}
+
 		// 开始时间
 		startTime := time.Now()
 
@@ -76,6 +81,19 @@ func Logger() gin.HandlerFunc {
 		}
 		if model != "" {
 			fields = append(fields, zap.String("model", model))
+		}
+
+		if c.Request != nil {
+			if snap, ok := httputil.RequestBodyReadMetricsFromContext(c.Request.Context()); ok {
+				fields = append(fields,
+					zap.String("request_content_encoding", snap.ContentEncoding),
+					zap.Int64("request_declared_wire_bytes", snap.DeclaredWireBytes),
+					zap.Int64("request_wire_bytes", snap.ActualWireBytes),
+					zap.Int64("request_decompressed_bytes", snap.DecompressedBytes),
+					zap.Int64("request_wire_read_ms", snap.WireReadDuration.Milliseconds()),
+					zap.Int64("request_decompression_ms", snap.DecodeDuration.Milliseconds()),
+				)
+			}
 		}
 
 		l := logger.FromContext(c.Request.Context()).With(fields...)

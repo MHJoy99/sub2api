@@ -1,7 +1,10 @@
 package middleware
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -306,6 +310,100 @@ func TestLogger_AccessLogDroppedWhenLevelWarn(t *testing.T) {
 	for _, event := range events {
 		if event != nil && event.Message == "http request completed" {
 			t.Fatalf("access log should not be indexed when level=warn: %+v", event)
+		}
+	}
+}
+func TestLogger_AccessLogIncludesRequestBodyMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sink := initMiddlewareTestLogger(t)
+
+	r := gin.New()
+	r.Use(RequestLogger())
+	r.Use(Logger())
+
+	r.POST("/api/echo", func(c *gin.Context) {
+		body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.Data(http.StatusOK, "application/json", body)
+	})
+
+	const secretMarker = "sensitive-payload-xyz-987"
+	payload := []byte(`{"message":"` + secretMarker + `"}`)
+
+	// Case 1: identity
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/echo", bytes.NewReader(payload))
+		req.ContentLength = int64(len(payload))
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	// Case 2: gzip
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	_, _ = gw.Write(payload)
+	_ = gw.Close()
+	gzBytes := gzBuf.Bytes()
+
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/echo", bytes.NewReader(gzBytes))
+		req.Header.Set("Content-Encoding", "gzip")
+		req.ContentLength = int64(len(gzBytes))
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	events := sink.list()
+	var identityEvent, gzipEvent *logger.LogEvent
+	for _, ev := range events {
+		if ev.Message == "http request completed" && ev.Fields["path"] == "/api/echo" {
+			if ev.Fields["request_content_encoding"] == "identity" {
+				identityEvent = ev
+			} else if ev.Fields["request_content_encoding"] == "gzip" {
+				gzipEvent = ev
+			}
+		}
+	}
+
+	if identityEvent == nil {
+		t.Fatalf("identity access log event not found")
+	}
+	if gzipEvent == nil {
+		t.Fatalf("gzip access log event not found")
+	}
+
+	// Verify identity fields
+	if identityEvent.Fields["request_wire_bytes"] != int64(len(payload)) {
+		t.Fatalf("identity request_wire_bytes mismatch: got %v, want %d", identityEvent.Fields["request_wire_bytes"], len(payload))
+	}
+	if identityEvent.Fields["request_decompressed_bytes"] != int64(len(payload)) {
+		t.Fatalf("identity request_decompressed_bytes mismatch: got %v, want %d", identityEvent.Fields["request_decompressed_bytes"], len(payload))
+	}
+
+	// Verify gzip fields
+	if gzipEvent.Fields["request_wire_bytes"] != int64(len(gzBytes)) {
+		t.Fatalf("gzip request_wire_bytes mismatch: got %v, want %d", gzipEvent.Fields["request_wire_bytes"], len(gzBytes))
+	}
+	if gzipEvent.Fields["request_decompressed_bytes"] != int64(len(payload)) {
+		t.Fatalf("gzip request_decompressed_bytes mismatch: got %v, want %d", gzipEvent.Fields["request_decompressed_bytes"], len(payload))
+	}
+
+	// Verify no sensitive payload leaked
+	for _, ev := range []*logger.LogEvent{identityEvent, gzipEvent} {
+		for k, v := range ev.Fields {
+			strVal := fmt.Sprintf("%v", v)
+			if strings.Contains(k, secretMarker) || strings.Contains(strVal, secretMarker) {
+				t.Fatalf("sensitive marker leaked in field %s: %s", k, strVal)
+			}
 		}
 	}
 }

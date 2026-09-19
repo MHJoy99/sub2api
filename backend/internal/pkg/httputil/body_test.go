@@ -141,3 +141,98 @@ func TestReadRequestBodyWithPrealloc_RespectsIdentityEncoding(t *testing.T) {
 		t.Fatalf("body mismatch: got %q", got)
 	}
 }
+func TestRequestBodyReadMetrics_IdentityAndCompressed(t *testing.T) {
+	type testCase struct {
+		name       string
+		encoding   string
+		compressFn func([]byte) []byte
+	}
+	cases := []testCase{
+		{
+			name:     "identity",
+			encoding: "",
+			compressFn: func(b []byte) []byte {
+				return b
+			},
+		},
+		{
+			name:     "gzip",
+			encoding: "gzip",
+			compressFn: func(b []byte) []byte {
+				var buf bytes.Buffer
+				gw := gzip.NewWriter(&buf)
+				_, _ = gw.Write(b)
+				_ = gw.Close()
+				return buf.Bytes()
+			},
+		},
+		{
+			name:     "zstd",
+			encoding: "zstd",
+			compressFn: func(b []byte) []byte {
+				enc, _ := zstd.NewWriter(nil)
+				out := enc.EncodeAll(b, nil)
+				_ = enc.Close()
+				return out
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := tc.compressFn([]byte(samplePayload))
+			req := newRequestWithBody(t, wire, tc.encoding)
+			ctx := WithRequestBodyReadMetrics(req.Context())
+			req = req.WithContext(ctx)
+
+			got, err := ReadRequestBodyWithPrealloc(req)
+			if err != nil {
+				t.Fatalf("ReadRequestBodyWithPrealloc: %v", err)
+			}
+			if string(got) != samplePayload {
+				t.Fatalf("body mismatch: got %q, want %q", got, samplePayload)
+			}
+
+			snap, ok := RequestBodyReadMetricsFromContext(req.Context())
+			if !ok {
+				t.Fatalf("expected metrics snapshot to be present")
+			}
+			wantEncoding := tc.encoding
+			if wantEncoding == "" {
+				wantEncoding = "identity"
+			}
+			if snap.ContentEncoding != wantEncoding {
+				t.Fatalf("ContentEncoding mismatch: got %q, want %q", snap.ContentEncoding, wantEncoding)
+			}
+			if snap.DeclaredWireBytes != int64(len(wire)) {
+				t.Fatalf("DeclaredWireBytes mismatch: got %d, want %d", snap.DeclaredWireBytes, len(wire))
+			}
+			if snap.ActualWireBytes != int64(len(wire)) {
+				t.Fatalf("ActualWireBytes mismatch: got %d, want %d", snap.ActualWireBytes, len(wire))
+			}
+			if snap.DecompressedBytes != int64(len(samplePayload)) {
+				t.Fatalf("DecompressedBytes mismatch: got %d, want %d", snap.DecompressedBytes, len(samplePayload))
+			}
+			if snap.WireReadDuration < 0 {
+				t.Fatalf("invalid WireReadDuration: %v", snap.WireReadDuration)
+			}
+			if snap.DecodeDuration < 0 {
+				t.Fatalf("invalid DecodeDuration: %v", snap.DecodeDuration)
+			}
+
+			// PrereadBody pass-through should not overwrite the snapshot
+			req.Body = NewPrereadBody(got)
+			gotSecond, err := ReadRequestBodyWithPrealloc(req)
+			if err != nil {
+				t.Fatalf("second read failed: %v", err)
+			}
+			if !bytes.Equal(gotSecond, got) {
+				t.Fatalf("second read body altered")
+			}
+			snapSecond, ok := RequestBodyReadMetricsFromContext(req.Context())
+			if !ok || snapSecond != snap {
+				t.Fatalf("snapshot changed after second read: before=%+v, after=%+v", snap, snapSecond)
+			}
+		})
+	}
+}
